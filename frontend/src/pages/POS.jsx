@@ -1,0 +1,571 @@
+import { useState } from 'react';
+import { useNavigate } from 'react-router-dom';
+import { useAuth } from '../context/AuthContext';
+
+const MENU = [
+  { id: 1,  name: 'Espresso',        price: 120, emoji: '☕', cat: 'Coffee' },
+  { id: 2,  name: 'Cappuccino',      price: 180, emoji: '☕', cat: 'Coffee' },
+  { id: 3,  name: 'Latte',           price: 200, emoji: '🥛', cat: 'Coffee' },
+  { id: 4,  name: 'Cold Coffee',     price: 220, emoji: '🧋', cat: 'Coffee' },
+  { id: 5,  name: 'Americano',       price: 150, emoji: '☕', cat: 'Coffee' },
+  { id: 6,  name: 'Croissant',       price: 120, emoji: '🥐', cat: 'Food'   },
+  { id: 7,  name: 'Sandwich',        price: 180, emoji: '🥪', cat: 'Food'   },
+  { id: 8,  name: 'Muffin',          price: 90,  emoji: '🧁', cat: 'Food'   },
+  { id: 9,  name: 'Pancakes',        price: 220, emoji: '🥞', cat: 'Food'   },
+  { id: 10, name: 'Cheesecake',      price: 250, emoji: '🍰', cat: 'Snacks' },
+  { id: 11, name: 'Brownie',         price: 110, emoji: '🍫', cat: 'Snacks' },
+  { id: 12, name: 'Fruit Smoothie',  price: 160, emoji: '🍓', cat: 'Drinks' },
+];
+
+const TABLES = [1,2,3,4,5,6,7,8];
+const CATS   = ['All', 'Coffee', 'Food', 'Snacks', 'Drinks'];
+
+export default function POS() {
+  const { user, logout }        = useAuth();
+  const navigate                = useNavigate();
+  const [cart, setCart]         = useState([]);
+  const [table, setTable]       = useState(1);
+  const [cat, setCat]           = useState('All');
+  const [search, setSearch]     = useState('');
+  const [payModal, setPayModal] = useState(false);
+  const [payDone, setPayDone]   = useState(false);
+  const [payMethod, setMethod]  = useState('cash');
+  const [cashIn, setCashIn]     = useState('');
+
+  const filtered = MENU.filter(
+    m => (cat === 'All' || m.cat === cat) &&
+         m.name.toLowerCase().includes(search.toLowerCase())
+  );
+
+  const addItem = (item) => {
+    setCart(prev => {
+      const ex = prev.find(c => c.id === item.id);
+      return ex
+        ? prev.map(c => c.id === item.id ? { ...c, qty: c.qty + 1 } : c)
+        : [...prev, { ...item, qty: 1 }];
+    });
+  };
+
+  const removeItem = (id) => setCart(prev =>
+    prev.map(c => c.id === id ? { ...c, qty: c.qty - 1 } : c).filter(c => c.qty > 0)
+  );
+
+  const clearCart = () => setCart([]);
+
+  const subtotal = cart.reduce((s, c) => s + c.price * c.qty, 0);
+  const tax      = Math.round(subtotal * 0.05);
+  const total    = subtotal + tax;
+  const change   = Number(cashIn) - total;
+
+  const handlePayment = () => {
+    setPayDone(true);
+    setTimeout(() => {
+      setPayModal(false);
+      setPayDone(false);
+      setCart([]);
+      setCashIn('');
+    }, 2000);
+  };
+
+  const handleLogout = () => { logout(); navigate('/login'); };
+
+  return (
+    <div style={s.page}>
+      {/* ─ Top Bar ─ */}
+      <header style={s.topbar}>
+        <div style={s.topLeft}>
+          <div style={s.logo}>☕</div>
+          <div>
+            <div style={s.appName}>POS Café</div>
+            <div style={s.appSub}>Cashier Terminal</div>
+          </div>
+        </div>
+
+        <div style={s.tableSelector}>
+          <span style={s.tableLabel}>Table</span>
+          <div style={s.tableRow}>
+            {TABLES.map(t => (
+              <button
+                key={t}
+                onClick={() => setTable(t)}
+                style={{
+                  ...s.tableBtn,
+                  background: table === t ? '#f59e0b' : 'rgba(255,255,255,0.08)',
+                  color:      table === t ? '#000'    : '#d6d3d1',
+                  fontWeight: table === t ? 700       : 400,
+                  boxShadow:  table === t ? '0 0 12px rgba(245,158,11,0.4)' : 'none',
+                }}
+              >
+                {t}
+              </button>
+            ))}
+          </div>
+        </div>
+
+        <div style={s.topRight}>
+          <div style={s.cashierBadge}>
+            <div style={s.cashierAvatar}>{user?.name?.[0]?.toUpperCase()}</div>
+            <div>
+              <div style={{ fontSize: 13, fontWeight: 600, color: '#fafaf9' }}>{user?.name}</div>
+              <div style={{ fontSize: 10.5, color: '#78716c' }}>🧾 Cashier</div>
+            </div>
+          </div>
+          <button onClick={handleLogout} style={s.logoutBtn}>Sign Out</button>
+        </div>
+      </header>
+
+      <div style={s.body}>
+        {/* ─ Left: Menu ─ */}
+        <div style={s.menuCol}>
+          {/* Search + Filters */}
+          <div style={s.menuTop}>
+            <div style={s.searchWrap}>
+              <span style={s.searchIcon}>🔍</span>
+              <input
+                value={search}
+                onChange={e => setSearch(e.target.value)}
+                placeholder="Search menu..."
+                style={s.searchInput}
+              />
+              {search && (
+                <button onClick={() => setSearch('')} style={s.clearSearch}>✕</button>
+              )}
+            </div>
+            <div style={s.catRow}>
+              {CATS.map(c => (
+                <button
+                  key={c}
+                  onClick={() => setCat(c)}
+                  style={{
+                    ...s.catBtn,
+                    background: cat === c ? '#1c1917' : '#fff',
+                    color:      cat === c ? '#fff'    : '#44403c',
+                    border:     cat === c ? '1.5px solid #1c1917' : '1.5px solid #e7e5e4',
+                    fontWeight: cat === c ? 600 : 400,
+                  }}
+                >{c}</button>
+              ))}
+            </div>
+          </div>
+
+          {/* Menu Grid */}
+          <div style={s.menuGrid}>
+            {filtered.length === 0 ? (
+              <div style={s.emptyMenu}>
+                <div style={{ fontSize: 40 }}>🔍</div>
+                <p>No items found</p>
+              </div>
+            ) : filtered.map(item => {
+              const inCart = cart.find(c => c.id === item.id);
+              return (
+                <button
+                  key={item.id}
+                  onClick={() => addItem(item)}
+                  style={{
+                    ...s.menuCard,
+                    border: inCart ? '2px solid #f59e0b' : '2px solid #e7e5e4',
+                    boxShadow: inCart ? '0 0 0 3px rgba(245,158,11,0.15)' : 'none',
+                  }}
+                >
+                  <div style={s.menuEmoji}>{item.emoji}</div>
+                  <div style={s.menuName}>{item.name}</div>
+                  <div style={s.menuCat}>{item.cat}</div>
+                  <div style={s.menuPrice}>₹{item.price}</div>
+                  {inCart && (
+                    <div style={s.qtyBadge}>{inCart.qty}</div>
+                  )}
+                </button>
+              );
+            })}
+          </div>
+        </div>
+
+        {/* ─ Right: Order/Cart ─ */}
+        <div style={s.cartCol}>
+          <div style={s.cartHeader}>
+            <div>
+              <h2 style={s.cartTitle}>Order — Table {table}</h2>
+              <p style={s.cartSub}>{cart.length === 0 ? 'No items yet' : `${cart.reduce((s,c) => s+c.qty,0)} items`}</p>
+            </div>
+            {cart.length > 0 && (
+              <button onClick={clearCart} style={s.clearBtn}>Clear</button>
+            )}
+          </div>
+
+          {/* Cart items */}
+          <div style={s.cartItems}>
+            {cart.length === 0 ? (
+              <div style={s.emptyCart}>
+                <div style={{ fontSize: 48 }}>🧾</div>
+                <p style={{ color: '#a8a29e', fontSize: 14, marginTop: 12 }}>
+                  Add items from the menu
+                </p>
+              </div>
+            ) : cart.map(item => (
+              <div key={item.id} style={s.cartItem}>
+                <span style={s.cartEmoji}>{item.emoji}</span>
+                <div style={{ flex: 1 }}>
+                  <div style={s.cartItemName}>{item.name}</div>
+                  <div style={s.cartItemPrice}>₹{item.price} × {item.qty}</div>
+                </div>
+                <div style={s.qtyControl}>
+                  <button style={s.qtyBtn} onClick={() => removeItem(item.id)}>−</button>
+                  <span style={s.qtyNum}>{item.qty}</span>
+                  <button style={s.qtyBtn} onClick={() => addItem(item)}>+</button>
+                </div>
+                <div style={s.cartItemTotal}>₹{item.price * item.qty}</div>
+              </div>
+            ))}
+          </div>
+
+          {/* Summary */}
+          {cart.length > 0 && (
+            <div style={s.summary}>
+              <div style={s.summaryRow}>
+                <span>Subtotal</span>
+                <span>₹{subtotal}</span>
+              </div>
+              <div style={s.summaryRow}>
+                <span>GST (5%)</span>
+                <span>₹{tax}</span>
+              </div>
+              <div style={s.totalRow}>
+                <span>Total</span>
+                <span>₹{total}</span>
+              </div>
+
+              <button onClick={() => setPayModal(true)} style={s.payBtn}>
+                💳 Proceed to Payment
+              </button>
+
+              <button style={s.kitchenBtn}>
+                🍳 Send to Kitchen
+              </button>
+            </div>
+          )}
+        </div>
+      </div>
+
+      {/* ─ Payment Modal ─ */}
+      {payModal && (
+        <div style={s.overlay} onClick={(e) => e.target === e.currentTarget && !payDone && setPayModal(false)}>
+          <div style={s.modal} className="anim-popIn">
+            {payDone ? (
+              <div style={{ textAlign: 'center', padding: '24px 0' }}>
+                <div style={s.successCircle}>✓</div>
+                <h3 style={{ fontSize: 22, fontWeight: 800, color: '#16a34a', marginTop: 16, marginBottom: 8 }}>Payment Successful!</h3>
+                <p style={{ color: '#78716c', fontSize: 14 }}>Order for Table {table} is confirmed.</p>
+              </div>
+            ) : (
+              <>
+                <div style={s.modalHead}>
+                  <h3 style={s.modalTitle}>Payment — Table {table}</h3>
+                  <button onClick={() => setPayModal(false)} style={s.closeBtn}>✕</button>
+                </div>
+
+                <div style={s.totalBanner}>
+                  <span style={{ color: '#78716c', fontSize: 13 }}>Amount Due</span>
+                  <span style={{ fontSize: 34, fontWeight: 800, color: '#1c1917', letterSpacing: '-0.04em' }}>₹{total}</span>
+                </div>
+
+                {/* Payment Methods */}
+                <div style={s.methodRow}>
+                  {[
+                    { key: 'cash',  icon: '💵', label: 'Cash' },
+                    { key: 'card',  icon: '💳', label: 'Card' },
+                    { key: 'upi',   icon: '📱', label: 'UPI QR' },
+                  ].map(m => (
+                    <button
+                      key={m.key}
+                      onClick={() => setMethod(m.key)}
+                      style={{
+                        ...s.methodBtn,
+                        background:  payMethod === m.key ? '#1c1917' : '#f7f4f0',
+                        color:       payMethod === m.key ? '#fff'    : '#44403c',
+                        borderColor: payMethod === m.key ? '#1c1917' : '#e7e5e4',
+                      }}
+                    >
+                      <span style={{ fontSize: 22 }}>{m.icon}</span>
+                      <span style={{ fontSize: 12, fontWeight: 600 }}>{m.label}</span>
+                    </button>
+                  ))}
+                </div>
+
+                {/* Cash input */}
+                {payMethod === 'cash' && (
+                  <div style={s.cashSection} className="anim-slideDown">
+                    <label style={s.cashLabel}>Amount Received</label>
+                    <input
+                      type="number"
+                      value={cashIn}
+                      onChange={e => setCashIn(e.target.value)}
+                      placeholder={`₹${total}`}
+                      style={s.cashInput}
+                    />
+                    {cashIn && Number(cashIn) >= total && (
+                      <div style={s.changeBox}>
+                        Change: <strong style={{ color: '#16a34a' }}>₹{change}</strong>
+                      </div>
+                    )}
+                  </div>
+                )}
+
+                {/* UPI QR placeholder */}
+                {payMethod === 'upi' && (
+                  <div style={s.qrBox} className="anim-slideDown">
+                    <div style={s.qrPlaceholder}>
+                      <div style={{ fontSize: 48 }}>📱</div>
+                      <p style={{ fontSize: 13, color: '#78716c', marginTop: 8 }}>Scan QR to pay ₹{total}</p>
+                    </div>
+                  </div>
+                )}
+
+                <button
+                  onClick={handlePayment}
+                  disabled={payMethod === 'cash' && (!cashIn || Number(cashIn) < total)}
+                  style={{
+                    ...s.confirmBtn,
+                    opacity: (payMethod === 'cash' && (!cashIn || Number(cashIn) < total)) ? 0.5 : 1,
+                    cursor:  (payMethod === 'cash' && (!cashIn || Number(cashIn) < total)) ? 'not-allowed' : 'pointer',
+                  }}
+                >
+                  ✅ Confirm Payment
+                </button>
+              </>
+            )}
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
+
+const s = {
+  page: { minHeight: '100vh', background: '#0f0e0d', display: 'flex', flexDirection: 'column', fontFamily: "'Inter', sans-serif" },
+
+  topbar: {
+    height: 64, background: '#1a1614',
+    borderBottom: '1px solid rgba(255,255,255,0.06)',
+    display: 'flex', alignItems: 'center',
+    justifyContent: 'space-between', padding: '0 24px',
+    position: 'sticky', top: 0, zIndex: 100,
+    flexShrink: 0,
+  },
+  topLeft:  { display: 'flex', alignItems: 'center', gap: 12 },
+  logo:     { fontSize: 26 },
+  appName:  { fontSize: 14, fontWeight: 700, color: '#fafaf9', letterSpacing: '-0.02em' },
+  appSub:   { fontSize: 10.5, color: '#57534e' },
+
+  tableSelector: { display: 'flex', alignItems: 'center', gap: 10 },
+  tableLabel:    { fontSize: 12, color: '#57534e', fontWeight: 600, textTransform: 'uppercase', letterSpacing: '0.06em' },
+  tableRow:      { display: 'flex', gap: 6 },
+  tableBtn: {
+    width: 32, height: 32, borderRadius: 8,
+    border: 'none', cursor: 'pointer',
+    fontSize: 13, fontWeight: 500,
+    transition: 'all 0.15s ease',
+  },
+
+  topRight:     { display: 'flex', alignItems: 'center', gap: 12 },
+  cashierBadge: { display: 'flex', alignItems: 'center', gap: 10 },
+  cashierAvatar:{
+    width: 34, height: 34, borderRadius: '50%',
+    background: 'linear-gradient(135deg, #3b82f6, #6366f1)',
+    color: '#fff', fontSize: 14, fontWeight: 700,
+    display: 'flex', alignItems: 'center', justifyContent: 'center',
+  },
+  logoutBtn: {
+    padding: '6px 14px', borderRadius: 8,
+    border: '1px solid rgba(255,255,255,0.12)',
+    background: 'transparent', color: '#a8a29e',
+    fontSize: 12, cursor: 'pointer', fontWeight: 500,
+  },
+
+  body: { display: 'flex', flex: 1, overflow: 'hidden' },
+
+  /* Menu column */
+  menuCol: {
+    flex: 1, display: 'flex', flexDirection: 'column',
+    borderRight: '1px solid rgba(255,255,255,0.06)',
+    overflow: 'hidden',
+  },
+  menuTop: {
+    padding: '16px 20px', borderBottom: '1px solid rgba(255,255,255,0.06)',
+    background: '#1a1614',
+  },
+  searchWrap: { position: 'relative', marginBottom: 12 },
+  searchIcon: { position: 'absolute', left: 12, top: '50%', transform: 'translateY(-50%)', fontSize: 14 },
+  searchInput:{
+    width: '100%', padding: '10px 36px',
+    borderRadius: 10, border: '1px solid rgba(255,255,255,0.08)',
+    background: 'rgba(255,255,255,0.05)', color: '#fafaf9',
+    fontSize: 13, fontFamily: 'Inter, sans-serif',
+    outline: 'none',
+  },
+  clearSearch:{
+    position: 'absolute', right: 12, top: '50%', transform: 'translateY(-50%)',
+    background: 'none', border: 'none', color: '#78716c', cursor: 'pointer', fontSize: 13,
+  },
+  catRow: { display: 'flex', gap: 6, flexWrap: 'wrap' },
+  catBtn: {
+    padding: '5px 14px', borderRadius: 99, fontSize: 12, fontWeight: 500,
+    cursor: 'pointer', transition: 'all 0.15s ease',
+  },
+
+  menuGrid: {
+    display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(140px, 1fr))',
+    gap: 12, padding: 20, overflowY: 'auto', flex: 1,
+    alignContent: 'start',
+  },
+  menuCard: {
+    background: '#1c1917', borderRadius: 14, padding: '16px 14px',
+    cursor: 'pointer', textAlign: 'center', position: 'relative',
+    transition: 'all 0.15s ease',
+    display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 4,
+  },
+  menuEmoji: { fontSize: 32, marginBottom: 6 },
+  menuName:  { fontSize: 12.5, fontWeight: 600, color: '#fafaf9', lineHeight: 1.3 },
+  menuCat:   { fontSize: 10.5, color: '#57534e' },
+  menuPrice: { fontSize: 14, fontWeight: 700, color: '#f59e0b', marginTop: 4 },
+  qtyBadge:  {
+    position: 'absolute', top: -6, right: -6,
+    width: 22, height: 22, borderRadius: '50%',
+    background: '#f59e0b', color: '#000',
+    fontSize: 11, fontWeight: 800,
+    display: 'flex', alignItems: 'center', justifyContent: 'center',
+  },
+  emptyMenu: { gridColumn: '1/-1', textAlign: 'center', padding: '60px 0', color: '#57534e', fontSize: 14 },
+
+  /* Cart column */
+  cartCol: {
+    width: 360, background: '#141210',
+    display: 'flex', flexDirection: 'column',
+    borderLeft: '1px solid rgba(255,255,255,0.06)',
+  },
+  cartHeader: {
+    padding: '18px 20px', borderBottom: '1px solid rgba(255,255,255,0.06)',
+    display: 'flex', alignItems: 'flex-start', justifyContent: 'space-between',
+    background: '#1a1614',
+  },
+  cartTitle: { fontSize: 15, fontWeight: 700, color: '#fafaf9', marginBottom: 3 },
+  cartSub:   { fontSize: 12, color: '#57534e' },
+  clearBtn:  {
+    padding: '5px 12px', borderRadius: 8,
+    border: '1px solid rgba(239,68,68,0.3)',
+    background: 'rgba(239,68,68,0.08)', color: '#ef4444',
+    fontSize: 11, fontWeight: 600, cursor: 'pointer',
+  },
+
+  cartItems: { flex: 1, overflowY: 'auto', padding: '12px 0' },
+  emptyCart: { textAlign: 'center', padding: '60px 20px' },
+  cartItem:  {
+    display: 'flex', alignItems: 'center', gap: 10,
+    padding: '10px 18px', borderBottom: '1px solid rgba(255,255,255,0.04)',
+    transition: 'background 0.1s',
+  },
+  cartEmoji:    { fontSize: 20, flexShrink: 0 },
+  cartItemName: { fontSize: 13, fontWeight: 600, color: '#fafaf9', marginBottom: 3 },
+  cartItemPrice:{ fontSize: 11, color: '#57534e' },
+  cartItemTotal:{ fontSize: 14, fontWeight: 700, color: '#f59e0b', flexShrink: 0, minWidth: 52, textAlign: 'right' },
+  qtyControl:   { display: 'flex', alignItems: 'center', gap: 6, flexShrink: 0 },
+  qtyBtn: {
+    width: 24, height: 24, borderRadius: 6,
+    border: '1px solid rgba(255,255,255,0.1)',
+    background: 'rgba(255,255,255,0.06)', color: '#fafaf9',
+    cursor: 'pointer', fontSize: 14, fontWeight: 600,
+    display: 'flex', alignItems: 'center', justifyContent: 'center',
+  },
+  qtyNum: { fontSize: 14, fontWeight: 700, color: '#fafaf9', minWidth: 20, textAlign: 'center' },
+
+  summary: { padding: '16px 20px', borderTop: '1px solid rgba(255,255,255,0.06)' },
+  summaryRow: {
+    display: 'flex', justifyContent: 'space-between',
+    fontSize: 13, color: '#78716c', marginBottom: 8,
+  },
+  totalRow: {
+    display: 'flex', justifyContent: 'space-between',
+    fontSize: 18, fontWeight: 800, color: '#fafaf9',
+    paddingTop: 12, borderTop: '1px solid rgba(255,255,255,0.08)',
+    marginTop: 4, marginBottom: 16,
+  },
+  payBtn: {
+    width: '100%', padding: '13px', borderRadius: 12, border: 'none',
+    background: 'linear-gradient(135deg, #f59e0b, #f97316)',
+    color: '#000', fontSize: 14, fontWeight: 700,
+    cursor: 'pointer', marginBottom: 8,
+    boxShadow: '0 4px 16px rgba(245,158,11,0.3)',
+  },
+  kitchenBtn:{
+    width: '100%', padding: '11px', borderRadius: 12,
+    border: '1px solid rgba(249,115,22,0.3)',
+    background: 'rgba(249,115,22,0.08)', color: '#f97316',
+    fontSize: 13, fontWeight: 600, cursor: 'pointer',
+  },
+
+  /* Payment Modal */
+  overlay: {
+    position: 'fixed', inset: 0,
+    background: 'rgba(0,0,0,0.65)', backdropFilter: 'blur(4px)',
+    display: 'flex', alignItems: 'center', justifyContent: 'center',
+    zIndex: 200, padding: 24,
+  },
+  modal: {
+    background: '#fff', borderRadius: 24, padding: '32px',
+    width: '100%', maxWidth: 440,
+    boxShadow: '0 24px 80px rgba(0,0,0,0.35)',
+  },
+  modalHead: {
+    display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 24,
+  },
+  modalTitle:  { fontSize: 18, fontWeight: 800, color: '#1c1917', letterSpacing: '-0.02em' },
+  closeBtn: {
+    width: 32, height: 32, borderRadius: '50%', border: 'none',
+    background: '#f5f5f4', cursor: 'pointer', fontSize: 14, color: '#44403c',
+  },
+  totalBanner: {
+    background: '#fafaf9', borderRadius: 14, padding: '16px 20px',
+    display: 'flex', flexDirection: 'column', alignItems: 'center',
+    marginBottom: 20, border: '1px solid #f0eeed',
+  },
+  methodRow: { display: 'flex', gap: 10, marginBottom: 20 },
+  methodBtn: {
+    flex: 1, padding: '12px 8px', borderRadius: 12,
+    border: '1.5px solid', cursor: 'pointer',
+    display: 'flex', flexDirection: 'column',
+    alignItems: 'center', gap: 5,
+    transition: 'all 0.15s ease',
+    fontFamily: 'Inter, sans-serif',
+  },
+  cashSection:  { marginBottom: 20 },
+  cashLabel:    { display: 'block', fontSize: 12.5, fontWeight: 600, color: '#44403c', marginBottom: 8 },
+  cashInput:    {
+    width: '100%', padding: '12px 16px', borderRadius: 12,
+    border: '1.5px solid #e7e5e4', fontSize: 20, fontWeight: 700,
+    color: '#1c1917', background: '#fafaf9', fontFamily: 'Inter, sans-serif',
+    outline: 'none',
+  },
+  changeBox: {
+    marginTop: 10, padding: '10px 16px', borderRadius: 10,
+    background: '#f0fdf4', border: '1px solid #bbf7d0',
+    fontSize: 14, color: '#16a34a',
+  },
+  qrBox:         { marginBottom: 20 },
+  qrPlaceholder: {
+    background: '#fafaf9', border: '2px dashed #e7e5e4',
+    borderRadius: 14, padding: '24px', textAlign: 'center',
+  },
+  confirmBtn: {
+    width: '100%', padding: '14px', borderRadius: 12, border: 'none',
+    background: 'linear-gradient(135deg, #1c1917, #292524)',
+    color: '#fff', fontSize: 15, fontWeight: 700, cursor: 'pointer',
+    boxShadow: '0 4px 16px rgba(28,25,23,0.25)',
+  },
+  successCircle: {
+    width: 80, height: 80, borderRadius: '50%',
+    background: 'linear-gradient(135deg, #22c55e, #16a34a)',
+    color: '#fff', fontSize: 36, fontWeight: 700,
+    display: 'flex', alignItems: 'center', justifyContent: 'center',
+    margin: '0 auto', boxShadow: '0 8px 32px rgba(34,197,94,0.35)',
+    animation: 'popIn 0.4s cubic-bezier(0.34, 1.56, 0.64, 1)',
+  },
+};
