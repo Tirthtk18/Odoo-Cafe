@@ -16,11 +16,12 @@ const orderSchema = new mongoose.Schema(
       name:  { type: String, required: true },
       email: { type: String },
     },
-    items:     { type: [orderItemSchema], required: true },
-    subtotal:  { type: Number, required: true },
-    gst:       { type: Number, required: true },
-    total:     { type: Number, required: true },
-    status:    {
+    items:       { type: [orderItemSchema], required: true },
+    tableNumber: { type: Number, default: 1 },
+    subtotal:    { type: Number, required: true },
+    gst:         { type: Number, required: true },
+    total:       { type: Number, required: true },
+    status:      {
       type: String,
       enum: ['new', 'preparing', 'ready', 'served'],
       default: 'new',

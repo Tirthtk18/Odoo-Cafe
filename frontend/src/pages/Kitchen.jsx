@@ -3,7 +3,7 @@ import { useAuth } from '../context/AuthContext';
 import { useNavigate } from 'react-router-dom';
 
 const ORDER_BASE = 'http://localhost:5000/api/orders';
-const POLL_MS    = 10_000; // refresh every 10 s
+const POLL_MS    = 5_000; // refresh every 5 s
 
 const STATUS = {
   new:       { label: 'New',       bg: '#fef2f2', text: '#dc2626', dot: '#ef4444', action: 'Start Preparing', next: 'preparing' },
@@ -148,6 +148,11 @@ export default function Kitchen() {
                     <div>
                       <div style={s.orderId}>#{order._id.slice(-6).toUpperCase()}</div>
                       <div style={s.orderCustomer}>👤 {order.customer?.name || 'Customer'}</div>
+                      {order.tableNumber && (
+                        <div style={{ fontSize: 11.5, color: '#f59e0b', fontWeight: 700, marginTop: 3 }}>
+                          🪑 Table {order.tableNumber}
+                        </div>
+                      )}
                     </div>
                     <div style={{ textAlign: 'right' }}>
                       <span style={{ ...s.statusPill, background: st.bg, color: st.text }}>

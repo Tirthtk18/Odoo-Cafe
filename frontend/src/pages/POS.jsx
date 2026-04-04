@@ -2,6 +2,8 @@ import { useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useAuth } from '../context/AuthContext';
 
+const ORDER_BASE = 'http://localhost:5000/api/orders';
+
 const MENU = [
   { id: 1,  name: 'Espresso',        price: 120, emoji: '☕', cat: 'Coffee' },
   { id: 2,  name: 'Cappuccino',      price: 180, emoji: '☕', cat: 'Coffee' },
@@ -32,12 +34,24 @@ export default function POS() {
   const [payMethod, setMethod]  = useState('cash');
   const [cashIn, setCashIn]     = useState('');
 
+  // Order status
+  const [sending, setSending]   = useState(false);
+  const [sentOrderId, setSentOrderId] = useState(null); // tracks the current DB order id
+  const [toast, setToast]       = useState({ msg: '', type: 'success' });
+
+  const showToast = (msg, type = 'success') => {
+    setToast({ msg, type });
+    setTimeout(() => setToast({ msg: '', type: 'success' }), 3500);
+  };
+
   const filtered = MENU.filter(
     m => (cat === 'All' || m.cat === cat) &&
          m.name.toLowerCase().includes(search.toLowerCase())
   );
 
   const addItem = (item) => {
+    // If order already sent to kitchen, don't allow modification
+    if (sentOrderId) return;
     setCart(prev => {
       const ex = prev.find(c => c.id === item.id);
       return ex
@@ -46,31 +60,132 @@ export default function POS() {
     });
   };
 
-  const removeItem = (id) => setCart(prev =>
-    prev.map(c => c.id === id ? { ...c, qty: c.qty - 1 } : c).filter(c => c.qty > 0)
-  );
+  const removeItem = (id) => {
+    if (sentOrderId) return;
+    setCart(prev =>
+      prev.map(c => c.id === id ? { ...c, qty: c.qty - 1 } : c).filter(c => c.qty > 0)
+    );
+  };
 
-  const clearCart = () => setCart([]);
+  const clearCart = () => {
+    if (sentOrderId) return;
+    setCart([]);
+  };
 
   const subtotal = cart.reduce((s, c) => s + c.price * c.qty, 0);
   const tax      = Math.round(subtotal * 0.05);
   const total    = subtotal + tax;
   const change   = Number(cashIn) - total;
 
-  const handlePayment = () => {
+  // ── Send order to kitchen (saves to DB) ──────────────────────────────────
+  const sendToKitchen = async () => {
+    if (cart.length === 0 || sending || sentOrderId) return;
+    setSending(true);
+    try {
+      const res = await fetch(ORDER_BASE, {
+        method:  'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          Authorization:  `Bearer ${user?.token}`,
+        },
+        body: JSON.stringify({
+          items:       cart,
+          tableNumber: table,
+          subtotal,
+          gst: tax,
+          total,
+        }),
+      });
+      const data = await res.json();
+      if (res.ok) {
+        setSentOrderId(data._id);
+        showToast(`✅ Order sent to Kitchen — Table ${table}`, 'success');
+      } else {
+        showToast(`❌ ${data.message || 'Failed to send order'}`, 'error');
+      }
+    } catch (err) {
+      console.error('Send to kitchen error:', err);
+      showToast('❌ Network error. Check if backend is running.', 'error');
+    } finally {
+      setSending(false);
+    }
+  };
+
+  // ── Confirm payment (saves order if not already sent) ────────────────────
+  const handlePayment = async () => {
+    // If order wasn't yet sent to kitchen, send it now as part of payment
+    if (!sentOrderId) {
+      setSending(true);
+      try {
+        const res = await fetch(ORDER_BASE, {
+          method:  'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            Authorization:  `Bearer ${user?.token}`,
+          },
+          body: JSON.stringify({
+            items:       cart,
+            tableNumber: table,
+            subtotal,
+            gst: tax,
+            total,
+          }),
+        });
+        if (!res.ok) {
+          const data = await res.json();
+          showToast(`❌ ${data.message || 'Failed to place order'}`, 'error');
+          setSending(false);
+          return;
+        }
+      } catch (err) {
+        console.error('Payment order error:', err);
+        showToast('❌ Network error. Check if backend is running.', 'error');
+        setSending(false);
+        return;
+      } finally {
+        setSending(false);
+      }
+    }
+
+    // Show success UI then reset
     setPayDone(true);
     setTimeout(() => {
       setPayModal(false);
       setPayDone(false);
       setCart([]);
       setCashIn('');
-    }, 2000);
+      setSentOrderId(null);
+    }, 2200);
+  };
+
+  // ── Reset after a new order session ─────────────────────────────────────
+  const startNewOrder = () => {
+    setCart([]);
+    setSentOrderId(null);
+    setPayModal(false);
+    setPayDone(false);
+    setCashIn('');
   };
 
   const handleLogout = () => { logout(); navigate('/login'); };
 
+  const orderLocked = !!sentOrderId; // cart is locked once sent to kitchen
+
   return (
     <div style={s.page}>
+
+      {/* Toast */}
+      {toast.msg && (
+        <div style={{
+          ...s.toast,
+          background: toast.type === 'error' ? '#fef2f2' : '#f0fdf4',
+          color:      toast.type === 'error' ? '#dc2626' : '#16a34a',
+          border:     toast.type === 'error' ? '1px solid #fecaca' : '1px solid #bbf7d0',
+        }}>
+          {toast.msg}
+        </div>
+      )}
+
       {/* ─ Top Bar ─ */}
       <header style={s.topbar}>
         <div style={s.topLeft}>
@@ -87,13 +202,16 @@ export default function POS() {
             {TABLES.map(t => (
               <button
                 key={t}
-                onClick={() => setTable(t)}
+                onClick={() => !orderLocked && setTable(t)}
+                title={orderLocked ? 'Cannot change table after sending to kitchen' : ''}
                 style={{
                   ...s.tableBtn,
                   background: table === t ? '#f59e0b' : 'rgba(255,255,255,0.08)',
                   color:      table === t ? '#000'    : '#d6d3d1',
                   fontWeight: table === t ? 700       : 400,
                   boxShadow:  table === t ? '0 0 12px rgba(245,158,11,0.4)' : 'none',
+                  opacity:    orderLocked && table !== t ? 0.4 : 1,
+                  cursor:     orderLocked ? 'not-allowed' : 'pointer',
                 }}
               >
                 {t}
@@ -119,13 +237,20 @@ export default function POS() {
         <div style={s.menuCol}>
           {/* Search + Filters */}
           <div style={s.menuTop}>
+            {orderLocked && (
+              <div style={s.lockedBanner}>
+                🍳 Order sent to Kitchen — Table {table}. &nbsp;
+                <button onClick={startNewOrder} style={s.newOrderBtn}>Start New Order</button>
+              </div>
+            )}
             <div style={s.searchWrap}>
               <span style={s.searchIcon}>🔍</span>
               <input
                 value={search}
                 onChange={e => setSearch(e.target.value)}
                 placeholder="Search menu..."
-                style={s.searchInput}
+                style={{ ...s.searchInput, opacity: orderLocked ? 0.5 : 1 }}
+                disabled={orderLocked}
               />
               {search && (
                 <button onClick={() => setSearch('')} style={s.clearSearch}>✕</button>
@@ -135,13 +260,15 @@ export default function POS() {
               {CATS.map(c => (
                 <button
                   key={c}
-                  onClick={() => setCat(c)}
+                  onClick={() => !orderLocked && setCat(c)}
                   style={{
                     ...s.catBtn,
                     background: cat === c ? '#1c1917' : '#fff',
                     color:      cat === c ? '#fff'    : '#44403c',
                     border:     cat === c ? '1.5px solid #1c1917' : '1.5px solid #e7e5e4',
                     fontWeight: cat === c ? 600 : 400,
+                    opacity:    orderLocked ? 0.5 : 1,
+                    cursor:     orderLocked ? 'not-allowed' : 'pointer',
                   }}
                 >{c}</button>
               ))}
@@ -161,10 +288,13 @@ export default function POS() {
                 <button
                   key={item.id}
                   onClick={() => addItem(item)}
+                  disabled={orderLocked}
                   style={{
                     ...s.menuCard,
                     border: inCart ? '2px solid #f59e0b' : '2px solid #e7e5e4',
                     boxShadow: inCart ? '0 0 0 3px rgba(245,158,11,0.15)' : 'none',
+                    opacity: orderLocked ? 0.5 : 1,
+                    cursor:  orderLocked ? 'not-allowed' : 'pointer',
                   }}
                 >
                   <div style={s.menuEmoji}>{item.emoji}</div>
@@ -187,8 +317,11 @@ export default function POS() {
               <h2 style={s.cartTitle}>Order — Table {table}</h2>
               <p style={s.cartSub}>{cart.length === 0 ? 'No items yet' : `${cart.reduce((s,c) => s+c.qty,0)} items`}</p>
             </div>
-            {cart.length > 0 && (
+            {cart.length > 0 && !orderLocked && (
               <button onClick={clearCart} style={s.clearBtn}>Clear</button>
+            )}
+            {orderLocked && (
+              <span style={s.sentPill}>🍳 Sent</span>
             )}
           </div>
 
@@ -208,11 +341,16 @@ export default function POS() {
                   <div style={s.cartItemName}>{item.name}</div>
                   <div style={s.cartItemPrice}>₹{item.price} × {item.qty}</div>
                 </div>
-                <div style={s.qtyControl}>
-                  <button style={s.qtyBtn} onClick={() => removeItem(item.id)}>−</button>
-                  <span style={s.qtyNum}>{item.qty}</span>
-                  <button style={s.qtyBtn} onClick={() => addItem(item)}>+</button>
-                </div>
+                {!orderLocked && (
+                  <div style={s.qtyControl}>
+                    <button style={s.qtyBtn} onClick={() => removeItem(item.id)}>−</button>
+                    <span style={s.qtyNum}>{item.qty}</span>
+                    <button style={s.qtyBtn} onClick={() => addItem(item)}>+</button>
+                  </div>
+                )}
+                {orderLocked && (
+                  <span style={s.qtyNum}>{item.qty}×</span>
+                )}
                 <div style={s.cartItemTotal}>₹{item.price * item.qty}</div>
               </div>
             ))}
@@ -238,8 +376,19 @@ export default function POS() {
                 💳 Proceed to Payment
               </button>
 
-              <button style={s.kitchenBtn}>
-                🍳 Send to Kitchen
+              <button
+                onClick={sendToKitchen}
+                disabled={sending || orderLocked}
+                style={{
+                  ...s.kitchenBtn,
+                  opacity: sending || orderLocked ? 0.6 : 1,
+                  cursor:  sending || orderLocked ? 'not-allowed' : 'pointer',
+                  background: orderLocked ? 'rgba(34,197,94,0.08)' : 'rgba(249,115,22,0.08)',
+                  borderColor: orderLocked ? 'rgba(34,197,94,0.3)' : 'rgba(249,115,22,0.3)',
+                  color: orderLocked ? '#22c55e' : '#f97316',
+                }}
+              >
+                {sending ? '⏳ Sending...' : orderLocked ? '✅ Sent to Kitchen' : '🍳 Send to Kitchen'}
               </button>
             </div>
           )}
@@ -255,6 +404,7 @@ export default function POS() {
                 <div style={s.successCircle}>✓</div>
                 <h3 style={{ fontSize: 22, fontWeight: 800, color: '#16a34a', marginTop: 16, marginBottom: 8 }}>Payment Successful!</h3>
                 <p style={{ color: '#78716c', fontSize: 14 }}>Order for Table {table} is confirmed.</p>
+                <p style={{ color: '#a8a29e', fontSize: 12, marginTop: 6 }}>Order sent to Kitchen &amp; Admin Dashboard.</p>
               </div>
             ) : (
               <>
@@ -262,6 +412,12 @@ export default function POS() {
                   <h3 style={s.modalTitle}>Payment — Table {table}</h3>
                   <button onClick={() => setPayModal(false)} style={s.closeBtn}>✕</button>
                 </div>
+
+                {sentOrderId && (
+                  <div style={s.kitchenConfirmed}>
+                    🍳 Kitchen notified — Order #{sentOrderId.slice(-6).toUpperCase()}
+                  </div>
+                )}
 
                 <div style={s.totalBanner}>
                   <span style={{ color: '#78716c', fontSize: 13 }}>Amount Due</span>
@@ -322,14 +478,17 @@ export default function POS() {
 
                 <button
                   onClick={handlePayment}
-                  disabled={payMethod === 'cash' && (!cashIn || Number(cashIn) < total)}
+                  disabled={
+                    sending ||
+                    (payMethod === 'cash' && (!cashIn || Number(cashIn) < total))
+                  }
                   style={{
                     ...s.confirmBtn,
-                    opacity: (payMethod === 'cash' && (!cashIn || Number(cashIn) < total)) ? 0.5 : 1,
-                    cursor:  (payMethod === 'cash' && (!cashIn || Number(cashIn) < total)) ? 'not-allowed' : 'pointer',
+                    opacity: (sending || (payMethod === 'cash' && (!cashIn || Number(cashIn) < total))) ? 0.5 : 1,
+                    cursor:  (sending || (payMethod === 'cash' && (!cashIn || Number(cashIn) < total))) ? 'not-allowed' : 'pointer',
                   }}
                 >
-                  ✅ Confirm Payment
+                  {sending ? '⏳ Processing...' : '✅ Confirm Payment'}
                 </button>
               </>
             )}
@@ -342,6 +501,14 @@ export default function POS() {
 
 const s = {
   page: { minHeight: '100vh', background: '#0f0e0d', display: 'flex', flexDirection: 'column', fontFamily: "'Inter', sans-serif" },
+
+  toast: {
+    position: 'fixed', top: 20, right: 24, zIndex: 999,
+    padding: '12px 20px', borderRadius: 12,
+    fontSize: 13.5, fontWeight: 600,
+    boxShadow: '0 8px 24px rgba(0,0,0,0.2)',
+    animation: 'slideDown 0.25s ease',
+  },
 
   topbar: {
     height: 64, background: '#1a1614',
@@ -361,8 +528,7 @@ const s = {
   tableRow:      { display: 'flex', gap: 6 },
   tableBtn: {
     width: 32, height: 32, borderRadius: 8,
-    border: 'none', cursor: 'pointer',
-    fontSize: 13, fontWeight: 500,
+    border: 'none', fontSize: 13, fontWeight: 500,
     transition: 'all 0.15s ease',
   },
 
@@ -393,6 +559,19 @@ const s = {
     padding: '16px 20px', borderBottom: '1px solid rgba(255,255,255,0.06)',
     background: '#1a1614',
   },
+
+  lockedBanner: {
+    display: 'flex', alignItems: 'center', flexWrap: 'wrap', gap: 8,
+    background: 'rgba(34,197,94,0.1)', border: '1px solid rgba(34,197,94,0.25)',
+    color: '#22c55e', borderRadius: 10, padding: '8px 14px',
+    fontSize: 13, fontWeight: 600, marginBottom: 12,
+  },
+  newOrderBtn: {
+    padding: '4px 12px', borderRadius: 8, background: '#22c55e',
+    color: '#000', border: 'none', cursor: 'pointer',
+    fontSize: 12, fontWeight: 700,
+  },
+
   searchWrap: { position: 'relative', marginBottom: 12 },
   searchIcon: { position: 'absolute', left: 12, top: '50%', transform: 'translateY(-50%)', fontSize: 14 },
   searchInput:{
@@ -400,7 +579,7 @@ const s = {
     borderRadius: 10, border: '1px solid rgba(255,255,255,0.08)',
     background: 'rgba(255,255,255,0.05)', color: '#fafaf9',
     fontSize: 13, fontFamily: 'Inter, sans-serif',
-    outline: 'none',
+    outline: 'none', boxSizing: 'border-box',
   },
   clearSearch:{
     position: 'absolute', right: 12, top: '50%', transform: 'translateY(-50%)',
@@ -409,7 +588,7 @@ const s = {
   catRow: { display: 'flex', gap: 6, flexWrap: 'wrap' },
   catBtn: {
     padding: '5px 14px', borderRadius: 99, fontSize: 12, fontWeight: 500,
-    cursor: 'pointer', transition: 'all 0.15s ease',
+    transition: 'all 0.15s ease',
   },
 
   menuGrid: {
@@ -419,7 +598,7 @@ const s = {
   },
   menuCard: {
     background: '#1c1917', borderRadius: 14, padding: '16px 14px',
-    cursor: 'pointer', textAlign: 'center', position: 'relative',
+    textAlign: 'center', position: 'relative',
     transition: 'all 0.15s ease',
     display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 4,
   },
@@ -454,6 +633,12 @@ const s = {
     border: '1px solid rgba(239,68,68,0.3)',
     background: 'rgba(239,68,68,0.08)', color: '#ef4444',
     fontSize: 11, fontWeight: 600, cursor: 'pointer',
+  },
+  sentPill: {
+    padding: '4px 12px', borderRadius: 99,
+    background: 'rgba(34,197,94,0.12)', color: '#22c55e',
+    fontSize: 11, fontWeight: 700,
+    border: '1px solid rgba(34,197,94,0.25)',
   },
 
   cartItems: { flex: 1, overflowY: 'auto', padding: '12px 0' },
@@ -497,9 +682,9 @@ const s = {
   },
   kitchenBtn:{
     width: '100%', padding: '11px', borderRadius: 12,
-    border: '1px solid rgba(249,115,22,0.3)',
-    background: 'rgba(249,115,22,0.08)', color: '#f97316',
-    fontSize: 13, fontWeight: 600, cursor: 'pointer',
+    border: '1px solid', fontSize: 13, fontWeight: 600,
+    transition: 'all 0.2s ease',
+    fontFamily: 'Inter, sans-serif',
   },
 
   /* Payment Modal */
@@ -515,13 +700,21 @@ const s = {
     boxShadow: '0 24px 80px rgba(0,0,0,0.35)',
   },
   modalHead: {
-    display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 24,
+    display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 20,
   },
   modalTitle:  { fontSize: 18, fontWeight: 800, color: '#1c1917', letterSpacing: '-0.02em' },
   closeBtn: {
     width: 32, height: 32, borderRadius: '50%', border: 'none',
     background: '#f5f5f4', cursor: 'pointer', fontSize: 14, color: '#44403c',
   },
+
+  kitchenConfirmed: {
+    background: '#f0fdf4', border: '1px solid #bbf7d0',
+    borderRadius: 10, padding: '8px 14px',
+    fontSize: 12.5, fontWeight: 600, color: '#16a34a',
+    marginBottom: 16,
+  },
+
   totalBanner: {
     background: '#fafaf9', borderRadius: 14, padding: '16px 20px',
     display: 'flex', flexDirection: 'column', alignItems: 'center',
@@ -542,7 +735,7 @@ const s = {
     width: '100%', padding: '12px 16px', borderRadius: 12,
     border: '1.5px solid #e7e5e4', fontSize: 20, fontWeight: 700,
     color: '#1c1917', background: '#fafaf9', fontFamily: 'Inter, sans-serif',
-    outline: 'none',
+    outline: 'none', boxSizing: 'border-box',
   },
   changeBox: {
     marginTop: 10, padding: '10px 16px', borderRadius: 10,
@@ -557,8 +750,9 @@ const s = {
   confirmBtn: {
     width: '100%', padding: '14px', borderRadius: 12, border: 'none',
     background: 'linear-gradient(135deg, #1c1917, #292524)',
-    color: '#fff', fontSize: 15, fontWeight: 700, cursor: 'pointer',
+    color: '#fff', fontSize: 15, fontWeight: 700,
     boxShadow: '0 4px 16px rgba(28,25,23,0.25)',
+    fontFamily: 'Inter, sans-serif',
   },
   successCircle: {
     width: 80, height: 80, borderRadius: '50%',
@@ -566,6 +760,5 @@ const s = {
     color: '#fff', fontSize: 36, fontWeight: 700,
     display: 'flex', alignItems: 'center', justifyContent: 'center',
     margin: '0 auto', boxShadow: '0 8px 32px rgba(34,197,94,0.35)',
-    animation: 'popIn 0.4s cubic-bezier(0.34, 1.56, 0.64, 1)',
   },
 };

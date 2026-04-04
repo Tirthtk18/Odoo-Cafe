@@ -4,7 +4,7 @@ import { useAuth } from '../context/AuthContext';
 import { getStaffApi, createStaffApi, deleteStaffApi } from '../api/authApi';
 
 const ORDER_BASE = 'http://localhost:5000/api/orders';
-const POLL_MS    = 10_000;
+const POLL_MS    = 5_000;
 
 const ROLE_COLORS = {
   cashier: { bg: '#eff6ff', text: '#1d4ed8', dot: '#3b82f6', icon: '🧾' },
@@ -350,6 +350,11 @@ export default function Dashboard() {
                         <div>
                           <div style={s.orderIdText}>#{order._id.slice(-6).toUpperCase()}</div>
                           <div style={s.orderCustomer}>👤 {order.customer?.name}</div>
+                          {order.tableNumber && (
+                            <div style={{ fontSize: 11, color: '#f59e0b', fontWeight: 700, marginTop: 2 }}>
+                              🪑 Table {order.tableNumber}
+                            </div>
+                          )}
                         </div>
                         <div style={{ textAlign: 'right' }}>
                           <span style={{ ...s.statusPill, background: st.bg, color: st.text }}>

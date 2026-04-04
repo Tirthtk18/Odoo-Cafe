@@ -4,7 +4,7 @@ const Order = require('../models/Order');
 // Customer places an order (requires auth token)
 exports.createOrder = async (req, res) => {
   try {
-    const { items, subtotal, gst, total } = req.body;
+    const { items, tableNumber, subtotal, gst, total } = req.body;
 
     if (!items || items.length === 0)
       return res.status(400).json({ message: 'Order must have at least one item' });
@@ -16,6 +16,7 @@ exports.createOrder = async (req, res) => {
         email: req.user.email,
       },
       items,
+      tableNumber: tableNumber || 1,
       subtotal,
       gst,
       total,
