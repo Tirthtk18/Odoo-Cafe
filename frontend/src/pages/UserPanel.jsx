@@ -2,26 +2,28 @@ import { useState } from 'react';
 import { useAuth } from '../context/AuthContext';
 import { useNavigate } from 'react-router-dom';
 
+const ORDER_BASE = 'http://localhost:5000/api/orders';
+
 const MENU = [
-  { id: 1,  name: 'Espresso',       price: 80,  cat: 'Coffee',  emoji: '☕', desc: 'Rich & bold single shot' },
-  { id: 2,  name: 'Cappuccino',     price: 120, cat: 'Coffee',  emoji: '☕', desc: 'Espresso with frothy milk' },
-  { id: 3,  name: 'Cold Brew',      price: 150, cat: 'Coffee',  emoji: '🧊', desc: 'Slow-steeped, smooth & strong' },
-  { id: 4,  name: 'Latte',          price: 130, cat: 'Coffee',  emoji: '🥛', desc: 'Espresso with steamed milk' },
-  { id: 5,  name: 'Croissant',      price: 90,  cat: 'Bakery',  emoji: '🥐', desc: 'Buttery & flaky pastry' },
-  { id: 6,  name: 'Blueberry Muffin',price:100, cat: 'Bakery',  emoji: '🫐', desc: 'Fresh baked every morning' },
-  { id: 7,  name: 'Club Sandwich',  price: 180, cat: 'Food',    emoji: '🥪', desc: 'Triple-layered with veggies' },
-  { id: 8,  name: 'Veg Burger',     price: 160, cat: 'Food',    emoji: '🍔', desc: 'Crispy patty with sauce' },
-  { id: 9,  name: 'Green Tea',      price: 60,  cat: 'Tea',     emoji: '🍵', desc: 'Light & refreshing' },
-  { id: 10, name: 'Masala Chai',    price: 40,  cat: 'Tea',     emoji: '🫖', desc: 'Indian spiced milk tea' },
+  { id: 1, name: 'Espresso', price: 80, cat: 'Coffee', emoji: '☕', desc: 'Rich & bold single shot' },
+  { id: 2, name: 'Cappuccino', price: 120, cat: 'Coffee', emoji: '☕', desc: 'Espresso with frothy milk' },
+  { id: 3, name: 'Cold Brew', price: 150, cat: 'Coffee', emoji: '🧊', desc: 'Slow-steeped, smooth & strong' },
+  { id: 4, name: 'Latte', price: 130, cat: 'Coffee', emoji: '🥛', desc: 'Espresso with steamed milk' },
+  { id: 5, name: 'Croissant', price: 90, cat: 'Bakery', emoji: '🥐', desc: 'Buttery & flaky pastry' },
+  { id: 6, name: 'Blueberry Muffin', price: 100, cat: 'Bakery', emoji: '🫐', desc: 'Fresh baked every morning' },
+  { id: 7, name: 'Club Sandwich', price: 180, cat: 'Food', emoji: '🥪', desc: 'Triple-layered with veggies' },
+  { id: 8, name: 'Veg Burger', price: 160, cat: 'Food', emoji: '🍔', desc: 'Crispy patty with sauce' },
+  { id: 9, name: 'Green Tea', price: 60, cat: 'Tea', emoji: '🍵', desc: 'Light & refreshing' },
+  { id: 10, name: 'Masala Chai', price: 40, cat: 'Tea', emoji: '🫖', desc: 'Indian spiced milk tea' },
 ];
 
 const CATS = ['All', 'Coffee', 'Tea', 'Bakery', 'Food'];
 
 export default function UserPanel() {
-  const { user, logout }    = useAuth();
-  const navigate            = useNavigate();
-  const [cat, setCat]       = useState('All');
-  const [cart, setCart]     = useState([]);
+  const { user, logout } = useAuth();
+  const navigate = useNavigate();
+  const [cat, setCat] = useState('All');
+  const [cart, setCart] = useState([]);
   const [ordered, setOrdered] = useState(false);
 
   const handleLogout = () => { logout(); navigate('/login'); };
@@ -47,11 +49,39 @@ export default function UserPanel() {
   const cartTotal = cart.reduce((sum, c) => sum + c.price * c.qty, 0);
   const cartCount = cart.reduce((sum, c) => sum + c.qty, 0);
 
-  const placeOrder = () => {
+  const [placing, setPlacing] = useState(false);
+  const [orderError, setOrderError] = useState('');
+
+  const placeOrder = async () => {
     if (cart.length === 0) return;
-    setOrdered(true);
-    setCart([]);
-    setTimeout(() => setOrdered(false), 5000);
+    setPlacing(true);
+    setOrderError('');
+    const subtotal = cartTotal;
+    const gst = Math.round(cartTotal * 0.05);
+    const total = subtotal + gst;
+    const items = cart.map(c => ({ id: c.id, name: c.name, qty: c.qty, price: c.price, emoji: c.emoji, cat: c.cat }));
+    try {
+      const res = await fetch(ORDER_BASE, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          Authorization: `Bearer ${user?.token}`,
+        },
+        body: JSON.stringify({ items, subtotal, gst, total }),
+      });
+      const data = await res.json();
+      if (res.ok) {
+        setOrdered(true);
+        setCart([]);
+        setTimeout(() => setOrdered(false), 5000);
+      } else {
+        setOrderError(data.message || 'Failed to place order. Please try again.');
+      }
+    } catch (err) {
+      setOrderError('Network error. Is the server running?');
+    } finally {
+      setPlacing(false);
+    }
   };
 
   const getQty = (id) => cart.find(c => c.id === id)?.qty || 0;
@@ -85,6 +115,12 @@ export default function UserPanel() {
           🎉 Order placed! Your items are being prepared. Estimated time: 10–15 min.
         </div>
       )}
+      {/* Order error toast */}
+      {orderError && (
+        <div style={{ ...s.toast, background: '#dc2626' }}>
+          ⚠ {orderError}
+        </div>
+      )}
 
       <div style={s.layout}>
         {/* ── Left: Menu ── */}
@@ -106,8 +142,8 @@ export default function UserPanel() {
                 style={{
                   ...s.catBtn,
                   background: cat === c ? '#7c3aed' : '#fff',
-                  color:      cat === c ? '#fff'     : '#44403c',
-                  borderColor:cat === c ? '#7c3aed'  : '#e7e5e4',
+                  color: cat === c ? '#fff' : '#44403c',
+                  borderColor: cat === c ? '#7c3aed' : '#e7e5e4',
                 }}
               >
                 {c}
@@ -193,8 +229,8 @@ export default function UserPanel() {
                   </div>
                 </div>
 
-                <button onClick={placeOrder} style={s.orderBtn}>
-                  Place Order →
+                <button onClick={placeOrder} disabled={placing} style={{ ...s.orderBtn, opacity: placing ? 0.7 : 1 }}>
+                  {placing ? 'Placing...' : 'Place Order →'}
                 </button>
                 <button onClick={() => setCart([])} style={s.clearBtn}>
                   Clear Cart
@@ -216,64 +252,64 @@ function getGreeting() {
 }
 
 const s = {
-  page:       { minHeight: '100vh', background: '#faf5ff' },
+  page: { minHeight: '100vh', background: '#faf5ff' },
 
-  header:     { background: '#fff', borderBottom: '1px solid #e9d5ff', padding: '0 28px', display: 'flex', alignItems: 'center', justifyContent: 'space-between', height: 60, position: 'sticky', top: 0, zIndex: 100, boxShadow: '0 2px 12px rgba(124,58,237,0.06)' },
+  header: { background: '#fff', borderBottom: '1px solid #e9d5ff', padding: '0 28px', display: 'flex', alignItems: 'center', justifyContent: 'space-between', height: 60, position: 'sticky', top: 0, zIndex: 100, boxShadow: '0 2px 12px rgba(124,58,237,0.06)' },
   headerLeft: { display: 'flex', alignItems: 'center', gap: 12 },
-  appName:    { fontSize: 14, fontWeight: 700, color: '#1c1917' },
-  appSub:     { fontSize: 11, color: '#a78bfa' },
-  headerRight:{ display: 'flex', alignItems: 'center', gap: 16 },
-  userGreet:  { display: 'flex', alignItems: 'center', gap: 10 },
+  appName: { fontSize: 14, fontWeight: 700, color: '#1c1917' },
+  appSub: { fontSize: 11, color: '#a78bfa' },
+  headerRight: { display: 'flex', alignItems: 'center', gap: 16 },
+  userGreet: { display: 'flex', alignItems: 'center', gap: 10 },
   userAvatar: { width: 34, height: 34, borderRadius: '50%', background: '#7c3aed', color: '#fff', fontWeight: 700, fontSize: 14, display: 'flex', alignItems: 'center', justifyContent: 'center' },
-  userName:   { fontSize: 13, fontWeight: 600, color: '#1c1917' },
-  userRole:   { fontSize: 11, color: '#7c3aed' },
-  logoutBtn:  { padding: '7px 14px', borderRadius: 8, border: '1px solid #e9d5ff', background: 'transparent', color: '#7c3aed', cursor: 'pointer', fontSize: 13, fontWeight: 500 },
+  userName: { fontSize: 13, fontWeight: 600, color: '#1c1917' },
+  userRole: { fontSize: 11, color: '#7c3aed' },
+  logoutBtn: { padding: '7px 14px', borderRadius: 8, border: '1px solid #e9d5ff', background: 'transparent', color: '#7c3aed', cursor: 'pointer', fontSize: 13, fontWeight: 500 },
 
-  toast:      { position: 'fixed', bottom: 24, left: '50%', transform: 'translateX(-50%)', background: '#7c3aed', color: '#fff', padding: '14px 28px', borderRadius: 12, fontSize: 14, fontWeight: 500, zIndex: 999, boxShadow: '0 8px 24px rgba(124,58,237,0.3)', whiteSpace: 'nowrap' },
+  toast: { position: 'fixed', bottom: 24, left: '50%', transform: 'translateX(-50%)', background: '#7c3aed', color: '#fff', padding: '14px 28px', borderRadius: 12, fontSize: 14, fontWeight: 500, zIndex: 999, boxShadow: '0 8px 24px rgba(124,58,237,0.3)', whiteSpace: 'nowrap' },
 
-  layout:     { display: 'flex', gap: 24, maxWidth: 1200, margin: '0 auto', padding: '24px 24px 40px' },
+  layout: { display: 'flex', gap: 24, maxWidth: 1200, margin: '0 auto', padding: '24px 24px 40px' },
 
-  menuSide:   { flex: 1, minWidth: 0 },
+  menuSide: { flex: 1, minWidth: 0 },
 
-  hero:       { background: 'linear-gradient(135deg, #7c3aed 0%, #6d28d9 100%)', borderRadius: 16, padding: '24px 28px', color: '#fff', marginBottom: 20 },
-  heroTitle:  { fontSize: 22, fontWeight: 700, marginBottom: 6 },
-  heroSub:    { fontSize: 14, opacity: 0.85 },
+  hero: { background: 'linear-gradient(135deg, #7c3aed 0%, #6d28d9 100%)', borderRadius: 16, padding: '24px 28px', color: '#fff', marginBottom: 20 },
+  heroTitle: { fontSize: 22, fontWeight: 700, marginBottom: 6 },
+  heroSub: { fontSize: 14, opacity: 0.85 },
 
-  catRow:     { display: 'flex', gap: 8, marginBottom: 18, flexWrap: 'wrap' },
-  catBtn:     { padding: '7px 16px', borderRadius: 20, border: '1.5px solid', fontSize: 13, fontWeight: 500, cursor: 'pointer', transition: 'all .15s' },
+  catRow: { display: 'flex', gap: 8, marginBottom: 18, flexWrap: 'wrap' },
+  catBtn: { padding: '7px 16px', borderRadius: 20, border: '1.5px solid', fontSize: 13, fontWeight: 500, cursor: 'pointer', transition: 'all .15s' },
 
-  menuGrid:   { display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(200px, 1fr))', gap: 14 },
-  menuCard:   { background: '#fff', borderRadius: 14, padding: '18px', transition: 'box-shadow .15s, transform .15s', cursor: 'default' },
-  menuCardTop:{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 10 },
-  menuEmoji:  { fontSize: 28 },
+  menuGrid: { display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(200px, 1fr))', gap: 14 },
+  menuCard: { background: '#fff', borderRadius: 14, padding: '18px', transition: 'box-shadow .15s, transform .15s', cursor: 'default' },
+  menuCardTop: { display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 10 },
+  menuEmoji: { fontSize: 28 },
   menuCatTag: { fontSize: 10, background: '#f3e8ff', color: '#7c3aed', padding: '2px 8px', borderRadius: 20, fontWeight: 500 },
-  menuCardName:{ fontSize: 14, fontWeight: 700, color: '#1c1917', marginBottom: 4 },
-  menuCardDesc:{ fontSize: 12, color: '#78716c', marginBottom: 14, lineHeight: 1.5 },
-  menuCardFooter:{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' },
-  menuPrice:  { fontSize: 16, fontWeight: 700, color: '#7c3aed' },
-  addBtn:     { padding: '6px 14px', borderRadius: 8, border: 'none', background: '#7c3aed', color: '#fff', fontSize: 13, fontWeight: 600, cursor: 'pointer' },
+  menuCardName: { fontSize: 14, fontWeight: 700, color: '#1c1917', marginBottom: 4 },
+  menuCardDesc: { fontSize: 12, color: '#78716c', marginBottom: 14, lineHeight: 1.5 },
+  menuCardFooter: { display: 'flex', alignItems: 'center', justifyContent: 'space-between' },
+  menuPrice: { fontSize: 16, fontWeight: 700, color: '#7c3aed' },
+  addBtn: { padding: '6px 14px', borderRadius: 8, border: 'none', background: '#7c3aed', color: '#fff', fontSize: 13, fontWeight: 600, cursor: 'pointer' },
   qtyControl: { display: 'flex', alignItems: 'center', gap: 6, background: '#f3e8ff', borderRadius: 8, padding: '2px 4px' },
-  qtyBtn:     { width: 26, height: 26, borderRadius: 6, border: 'none', background: '#7c3aed', color: '#fff', fontSize: 16, cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center', fontWeight: 700 },
-  qtyNum:     { fontSize: 14, fontWeight: 700, color: '#7c3aed', minWidth: 18, textAlign: 'center' },
+  qtyBtn: { width: 26, height: 26, borderRadius: 6, border: 'none', background: '#7c3aed', color: '#fff', fontSize: 16, cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center', fontWeight: 700 },
+  qtyNum: { fontSize: 14, fontWeight: 700, color: '#7c3aed', minWidth: 18, textAlign: 'center' },
 
-  cartSide:   { width: 300, flexShrink: 0 },
-  cartCard:   { background: '#fff', borderRadius: 16, padding: '22px', boxShadow: '0 4px 20px rgba(124,58,237,0.10)', position: 'sticky', top: 76 },
-  cartHead:   { display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 18 },
-  cartTitle:  { fontSize: 17, fontWeight: 700, color: '#1c1917' },
-  cartCount:  { fontSize: 12, background: '#7c3aed', color: '#fff', padding: '3px 10px', borderRadius: 20, fontWeight: 500 },
-  cartEmpty:  { textAlign: 'center', padding: '32px 0' },
+  cartSide: { width: 300, flexShrink: 0 },
+  cartCard: { background: '#fff', borderRadius: 16, padding: '22px', boxShadow: '0 4px 20px rgba(124,58,237,0.10)', position: 'sticky', top: 76 },
+  cartHead: { display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 18 },
+  cartTitle: { fontSize: 17, fontWeight: 700, color: '#1c1917' },
+  cartCount: { fontSize: 12, background: '#7c3aed', color: '#fff', padding: '3px 10px', borderRadius: 20, fontWeight: 500 },
+  cartEmpty: { textAlign: 'center', padding: '32px 0' },
 
-  cartItems:  { display: 'flex', flexDirection: 'column', gap: 12, marginBottom: 16 },
-  cartItem:   { display: 'flex', alignItems: 'center', gap: 10 },
-  cartItemName:{ fontSize: 13, fontWeight: 500, color: '#1c1917' },
-  cartItemPrice:{ fontSize: 12, color: '#78716c', marginTop: 2 },
-  cartItemTotal:{ fontSize: 14, fontWeight: 700, color: '#7c3aed' },
+  cartItems: { display: 'flex', flexDirection: 'column', gap: 12, marginBottom: 16 },
+  cartItem: { display: 'flex', alignItems: 'center', gap: 10 },
+  cartItemName: { fontSize: 13, fontWeight: 500, color: '#1c1917' },
+  cartItemPrice: { fontSize: 12, color: '#78716c', marginTop: 2 },
+  cartItemTotal: { fontSize: 14, fontWeight: 700, color: '#7c3aed' },
 
-  cartDivider:{ height: 1, background: '#f3e8ff', marginBottom: 14 },
-  cartSummary:{ display: 'flex', flexDirection: 'column', gap: 8, marginBottom: 18 },
+  cartDivider: { height: 1, background: '#f3e8ff', marginBottom: 14 },
+  cartSummary: { display: 'flex', flexDirection: 'column', gap: 8, marginBottom: 18 },
   summaryRow: { display: 'flex', justifyContent: 'space-between', fontSize: 13, color: '#78716c' },
-  summaryTotal:{ fontSize: 16, fontWeight: 700, color: '#1c1917', marginTop: 4 },
+  summaryTotal: { fontSize: 16, fontWeight: 700, color: '#1c1917', marginTop: 4 },
 
-  orderBtn:   { width: '100%', padding: '12px', borderRadius: 10, border: 'none', background: '#7c3aed', color: '#fff', fontSize: 14, fontWeight: 700, cursor: 'pointer', marginBottom: 8 },
-  clearBtn:   { width: '100%', padding: '10px', borderRadius: 10, border: '1px solid #e9d5ff', background: 'transparent', color: '#7c3aed', fontSize: 13, cursor: 'pointer' },
+  orderBtn: { width: '100%', padding: '12px', borderRadius: 10, border: 'none', background: '#7c3aed', color: '#fff', fontSize: 14, fontWeight: 700, cursor: 'pointer', marginBottom: 8 },
+  clearBtn: { width: '100%', padding: '10px', borderRadius: 10, border: '1px solid #e9d5ff', background: 'transparent', color: '#7c3aed', fontSize: 13, cursor: 'pointer' },
 };

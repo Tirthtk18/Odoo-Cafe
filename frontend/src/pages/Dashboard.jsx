@@ -1,7 +1,10 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useRef } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useAuth } from '../context/AuthContext';
 import { getStaffApi, createStaffApi, deleteStaffApi } from '../api/authApi';
+
+const ORDER_BASE = 'http://localhost:5000/api/orders';
+const POLL_MS    = 10_000;
 
 const ROLE_COLORS = {
   cashier: { bg: '#eff6ff', text: '#1d4ed8', dot: '#3b82f6', icon: '🧾' },
@@ -9,24 +12,39 @@ const ROLE_COLORS = {
 };
 
 const NAV_ITEMS = [
-  { key: 'overview', icon: '📊', label: 'Overview'      },
-  { key: 'staff',    icon: '👥', label: 'Staff'         },
-  { key: 'settings', icon: '⚙️',  label: 'Settings'     },
+  { key: 'overview', icon: '📊', label: 'Overview' },
+  { key: 'orders',   icon: '📋', label: 'Orders'   },
+  { key: 'staff',    icon: '👥', label: 'Staff'    },
+  { key: 'settings', icon: '⚙️',  label: 'Settings' },
 ];
 
+const ORDER_STATUS = {
+  new:       { label: 'New',       bg: '#fef2f2', text: '#dc2626', dot: '#ef4444' },
+  preparing: { label: 'Preparing', bg: '#fffbeb', text: '#d97706', dot: '#f59e0b' },
+  ready:     { label: 'Ready',     bg: '#f0fdf4', text: '#16a34a', dot: '#22c55e' },
+  served:    { label: 'Served',    bg: '#f0f9ff', text: '#0369a1', dot: '#38bdf8' },
+};
+
 export default function Dashboard() {
-  const { user, logout }     = useAuth();
-  const navigate             = useNavigate();
-  const [nav, setNav]        = useState('overview');
-  const [staff, setStaff]    = useState([]);
-  const [loadingStaff, setLS]= useState(true);
-  const [showModal, setModal]= useState(false);
-  const [form, setForm]      = useState({ name: '', email: '', password: '', role: 'cashier' });
-  const [formErr, setFormErr]= useState('');
-  const [creating, setCrtg]  = useState(false);
-  const [deletingId, setDelId]= useState(null);
-  const [toast, setToast]    = useState({ msg: '', type: 'success' });
-  const [showPwd, setShowPwd]= useState(false);
+  const { user, logout }       = useAuth();
+  const navigate               = useNavigate();
+  const [nav, setNav]          = useState('overview');
+  const [staff, setStaff]      = useState([]);
+  const [loadingStaff, setLS]  = useState(true);
+  const [showModal, setModal]  = useState(false);
+  const [form, setForm]        = useState({ name: '', email: '', password: '', role: 'cashier' });
+  const [formErr, setFormErr]  = useState('');
+  const [creating, setCrtg]    = useState(false);
+  const [deletingId, setDelId] = useState(null);
+  const [toast, setToast]      = useState({ msg: '', type: 'success' });
+  const [showPwd, setShowPwd]  = useState(false);
+
+  // ── Orders state ─────────────────────────────────────────────────────────
+  const [orders, setOrders]         = useState([]);
+  const [loadingOrders, setLO]      = useState(true);
+  const [orderFilter, setOFilter]   = useState('all');
+  const [deletingOrderId, setDelOrd]= useState(null);
+  const orderPollRef                = useRef(null);
 
   const token = user?.token;
 
@@ -43,6 +61,56 @@ export default function Dashboard() {
   };
 
   useEffect(() => { fetchStaff(); }, []);
+
+  // ── Orders fetching ────────────────────────────────────────────────────
+  const fetchOrders = async () => {
+    try {
+      const res  = await fetch(ORDER_BASE, {
+        headers: { Authorization: `Bearer ${token}` },
+      });
+      const data = await res.json();
+      if (Array.isArray(data)) setOrders(data);
+    } catch (err) {
+      console.error('Fetch orders error:', err);
+    } finally {
+      setLO(false);
+    }
+  };
+
+  useEffect(() => {
+    fetchOrders();
+    orderPollRef.current = setInterval(fetchOrders, POLL_MS);
+    return () => clearInterval(orderPollRef.current);
+  }, []);
+
+  const handleDeleteOrder = async (id) => {
+    if (!window.confirm('Remove this order?')) return;
+    setDelOrd(id);
+    try {
+      await fetch(`${ORDER_BASE}/${id}`, {
+        method:  'DELETE',
+        headers: { Authorization: `Bearer ${token}` },
+      });
+      setOrders(prev => prev.filter(o => o._id !== id));
+      showToast('🗑 Order removed', 'error');
+    } catch {
+      showToast('Failed to delete order', 'error');
+    } finally {
+      setDelOrd(null);
+    }
+  };
+
+  const timeAgo = (dateStr) => {
+    const mins = Math.floor((Date.now() - new Date(dateStr)) / 60000);
+    if (mins < 1) return 'just now';
+    if (mins === 1) return '1m ago';
+    if (mins < 60) return `${mins}m ago`;
+    return `${Math.floor(mins / 60)}h ago`;
+  };
+
+  const filteredOrders = orderFilter === 'all'
+    ? orders
+    : orders.filter(o => o.status === orderFilter);
 
   const handleLogout = () => { logout(); navigate('/login'); };
 
@@ -151,10 +219,10 @@ export default function Dashboard() {
             {/* Stats Grid */}
             <div style={s.statsGrid}>
               {[
-                { icon: '👥', label: 'Total Staff',   value: staff.length,  color: '#1c1917', desc: 'Active members'        },
-                { icon: '🧾', label: 'Cashiers',      value: cashierCount,  color: '#3b82f6', desc: 'POS terminal access'   },
-                { icon: '🍳', label: 'Kitchen Staff', value: kitchenCount,  color: '#f97316', desc: 'Order processing'      },
-                { icon: '☕', label: 'Café Status',   value: '● Open',      color: '#22c55e', desc: 'Accepting orders'      },
+                { icon: '📋', label: 'Total Orders',  value: orders.length,                                                color: '#7c3aed', desc: 'All time orders'        },
+                { icon: '🔴', label: 'New Orders',    value: orders.filter(o=>o.status==='new').length,        color: '#dc2626', desc: 'Awaiting kitchen'      },
+                { icon: '👥', label: 'Total Staff',   value: staff.length,                                                 color: '#1c1917', desc: 'Active members'        },
+                { icon: '☕', label: 'Café Status',   value: '● Open',                                                     color: '#22c55e', desc: 'Accepting orders'      },
               ].map(stat => (
                 <div key={stat.label} style={s.statCard}>
                   <div style={{ display: 'flex', alignItems: 'flex-start', justifyContent: 'space-between', marginBottom: 16 }}>
@@ -219,6 +287,105 @@ export default function Dashboard() {
                     );
                   })}
                 </div>
+              </div>
+            )}
+          </div>
+        )}
+
+        {/* ── Orders Tab ── */}
+        {nav === 'orders' && (
+          <div className="anim-fadeUp">
+            <div style={s.pageHead}>
+              <div>
+                <h1 style={s.pageTitle}>Live Orders</h1>
+                <p style={s.pageSub}>All customer orders in real-time. Auto-refreshes every 10 seconds.</p>
+              </div>
+              <button onClick={fetchOrders} style={{ ...s.addBtn, background: '#7c3aed' }}>↻ Refresh</button>
+            </div>
+
+            {/* Filter tabs */}
+            <div style={{ display: 'flex', gap: 8, marginBottom: 20, flexWrap: 'wrap' }}>
+              {['all', 'new', 'preparing', 'ready', 'served'].map(f => (
+                <button
+                  key={f}
+                  onClick={() => setOFilter(f)}
+                  style={{
+                    ...s.filterBtn,
+                    background:   orderFilter === f ? '#1c1917' : '#fff',
+                    color:        orderFilter === f ? '#fff'     : '#44403c',
+                    borderColor:  orderFilter === f ? '#1c1917'  : '#e7e5e4',
+                  }}
+                >
+                  {f.charAt(0).toUpperCase() + f.slice(1)}
+                  {f !== 'all' && (
+                    <span style={{ marginLeft: 6, fontSize: 11, opacity: 0.7 }}>
+                      ({orders.filter(o => o.status === f).length})
+                    </span>
+                  )}
+                </button>
+              ))}
+            </div>
+
+            {loadingOrders ? (
+              <div style={s.emptyState}>
+                <div style={{ display: 'flex', gap: 8, justifyContent: 'center' }}>
+                  {[0,1,2].map(i => (
+                    <div key={i} style={{ width: 8, height: 8, borderRadius: '50%', background: '#7c3aed', animation: `dotBounce 1.2s ease infinite`, animationDelay: `${i*0.15}s` }} />
+                  ))}
+                </div>
+                <p style={{ color: '#78716c', marginTop: 12, fontSize: 13 }}>Loading orders…</p>
+              </div>
+            ) : filteredOrders.length === 0 ? (
+              <div style={s.emptyState}>
+                <div style={{ fontSize: 52 }}>📭</div>
+                <p style={{ color: '#78716c', fontSize: 15, marginTop: 12 }}>No orders {orderFilter !== 'all' ? `with status "${orderFilter}"` : 'yet'}</p>
+              </div>
+            ) : (
+              <div style={s.ordersGrid}>
+                {filteredOrders.map(order => {
+                  const st = ORDER_STATUS[order.status] || ORDER_STATUS.new;
+                  return (
+                    <div key={order._id} style={{ ...s.orderCard, borderTop: `3px solid ${st.dot}` }}>
+                      <div style={s.orderCardHead}>
+                        <div>
+                          <div style={s.orderIdText}>#{order._id.slice(-6).toUpperCase()}</div>
+                          <div style={s.orderCustomer}>👤 {order.customer?.name}</div>
+                        </div>
+                        <div style={{ textAlign: 'right' }}>
+                          <span style={{ ...s.statusPill, background: st.bg, color: st.text }}>
+                            <span style={{ width: 6, height: 6, borderRadius: '50%', background: st.dot, display: 'inline-block', marginRight: 4 }} />
+                            {st.label}
+                          </span>
+                          <div style={s.orderTime}>{timeAgo(order.createdAt)}</div>
+                        </div>
+                      </div>
+
+                      <div style={s.orderItems}>
+                        {order.items.map((item, i) => (
+                          <div key={i} style={s.orderItemRow}>
+                            <span style={{ color: '#a8a29e' }}>•</span>
+                            <span>{item.name} × {item.qty}</span>
+                            <span style={{ marginLeft: 'auto', color: '#7c3aed', fontWeight: 600 }}>₹{item.price * item.qty}</span>
+                          </div>
+                        ))}
+                      </div>
+
+                      <div style={s.orderCardFooter}>
+                        <div>
+                          <div style={{ fontSize: 11, color: '#a8a29e' }}>Total</div>
+                          <div style={{ fontSize: 16, fontWeight: 800, color: '#1c1917' }}>₹{order.total}</div>
+                        </div>
+                        <button
+                          onClick={() => handleDeleteOrder(order._id)}
+                          disabled={deletingOrderId === order._id}
+                          style={s.deleteOrderBtn}
+                        >
+                          {deletingOrderId === order._id ? '…' : '🗑 Remove'}
+                        </button>
+                      </div>
+                    </div>
+                  );
+                })}
               </div>
             )}
           </div>
@@ -527,6 +694,20 @@ const s = {
   pageHead:  { display: 'flex', alignItems: 'flex-start', justifyContent: 'space-between', marginBottom: 28 },
   pageTitle: { fontSize: 24, fontWeight: 800, color: '#1c1917', letterSpacing: '-0.03em', marginBottom: 5 },
   pageSub:   { fontSize: 13.5, color: '#78716c' },
+
+  /* Orders tab */
+  filterBtn:      { padding: '7px 16px', borderRadius: 20, border: '1.5px solid', fontSize: 13, fontWeight: 500, cursor: 'pointer', transition: 'all .15s', fontFamily: 'Inter, sans-serif' },
+  ordersGrid:     { display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(300px, 1fr))', gap: 16 },
+  orderCard:      { background: '#fff', borderRadius: 14, padding: '18px', boxShadow: '0 2px 12px rgba(0,0,0,0.06)', border: '1px solid #ece9e6' },
+  orderCardHead:  { display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: 12 },
+  orderIdText:    { fontSize: 14, fontWeight: 700, color: '#1c1917', fontFamily: "'JetBrains Mono', monospace" },
+  orderCustomer:  { fontSize: 12, color: '#78716c', marginTop: 3 },
+  statusPill:     { display: 'inline-flex', alignItems: 'center', padding: '3px 10px', borderRadius: 20, fontSize: 11, fontWeight: 600 },
+  orderTime:      { fontSize: 11, color: '#a8a29e', marginTop: 4 },
+  orderItems:     { background: '#fafaf9', borderRadius: 8, padding: '10px 12px', display: 'flex', flexDirection: 'column', gap: 6, marginBottom: 12, fontSize: 13, color: '#44403c' },
+  orderItemRow:   { display: 'flex', alignItems: 'center', gap: 8 },
+  orderCardFooter:{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' },
+  deleteOrderBtn: { padding: '7px 14px', borderRadius: 8, border: '1px solid #fecaca', background: '#fef2f2', color: '#dc2626', fontSize: 12, cursor: 'pointer', fontWeight: 500, fontFamily: 'Inter, sans-serif' },
 
   /* Stats */
   statsGrid: { display: 'grid', gridTemplateColumns: 'repeat(4, 1fr)', gap: 16, marginBottom: 32 },
