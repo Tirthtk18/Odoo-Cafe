@@ -9,6 +9,9 @@ import Dashboard  from './pages/Dashboard';
 import Kitchen    from './pages/Kitchen';
 import UserPanel  from './pages/UserPanel';
 import POS        from './pages/POS';
+import TableOrder from './pages/TableOrder';
+import TableQR    from './pages/TableQR';
+
 
 const Unauthorized = () => (
   <div style={{
@@ -64,6 +67,16 @@ export default function App() {
           <Route path="/user" element={
             <ProtectedRoute roles={['user']}>
               <UserPanel />
+            </ProtectedRoute>
+          } />
+
+          {/* QR table ordering — PUBLIC, no login required */}
+          <Route path="/table/:tableId" element={<TableOrder />} />
+
+          {/* QR code generator — Admin & Cashier only */}
+          <Route path="/table-qr" element={
+            <ProtectedRoute roles={['admin', 'cashier']}>
+              <TableQR />
             </ProtectedRoute>
           } />
 

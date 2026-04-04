@@ -1,7 +1,7 @@
 const mongoose = require('mongoose');
 
 const orderItemSchema = new mongoose.Schema({
-  id:    { type: Number, required: true },
+  id:    { type: mongoose.Schema.Types.Mixed },   // accepts both Number (POS) and String (_id from Products)
   name:  { type: String, required: true },
   price: { type: Number, required: true },
   qty:   { type: Number, required: true },
@@ -26,6 +26,17 @@ const orderSchema = new mongoose.Schema(
       enum: ['new', 'preparing', 'ready', 'served'],
       default: 'new',
     },
+    paymentMethod: {
+      type: String,
+      enum: ['cash', 'card', 'upi', 'pending', 'razorpay', 'fake_pay'],
+      default: 'pending',
+    },
+    source: {
+      type: String,
+      enum: ['cashier', 'qr'],
+      default: 'cashier',
+    },
+    guestName:   { type: String },
     orderNumber: { type: Number },
   },
   { timestamps: true }

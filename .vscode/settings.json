@@ -1,0 +1,11 @@
+{
+  "typescript.preferences.checkJs": false,
+  "javascript.validate.enable": false,
+  "typescript.validate.enable": false,
+  "typescript.tsserver.experimental.enableProjectDiagnostics": false,
+  "editor.codeActionsOnSave": {},
+  "files.associations": {
+    "*.js": "javascript",
+    "*.jsx": "javascriptreact"
+  }
+}

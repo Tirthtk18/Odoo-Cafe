@@ -1,6 +1,6 @@
 require('dotenv').config();
 const express = require('express');
-const cors = require('cors');
+const cors    = require('cors');
 const connectDB = require('./config/db');
 
 connectDB();
@@ -14,8 +14,11 @@ app.use(cors({
 app.use(express.json());
 
 // Routes
-app.use('/api/auth', require('./routes/authRoutes'));
-app.use('/api/orders', require('./routes/orderRoutes'));
+app.use('/api/auth',     require('./routes/authRoutes'));
+app.use('/api/orders',   require('./routes/orderRoutes'));
+app.use('/api/products', require('./routes/productRoutes'));
+app.use('/api/tables',   require('./routes/tableRoutes'));
+app.use('/api/payment',  require('./routes/paymentRoutes'));
 
 // Health check
 app.get('/', (req, res) => res.json({ message: 'POS Café API running ☕' }));

@@ -1,34 +1,33 @@
-import { useState } from 'react';
-import { useNavigate } from 'react-router-dom';
+import { useState, useEffect } from 'react';
+import { useNavigate, Link } from 'react-router-dom';
 import { useAuth } from '../context/AuthContext';
 
 const ORDER_BASE = 'http://localhost:5000/api/orders';
-
-const MENU = [
-  { id: 1,  name: 'Espresso',        price: 120, emoji: '☕', cat: 'Coffee' },
-  { id: 2,  name: 'Cappuccino',      price: 180, emoji: '☕', cat: 'Coffee' },
-  { id: 3,  name: 'Latte',           price: 200, emoji: '🥛', cat: 'Coffee' },
-  { id: 4,  name: 'Cold Coffee',     price: 220, emoji: '🧋', cat: 'Coffee' },
-  { id: 5,  name: 'Americano',       price: 150, emoji: '☕', cat: 'Coffee' },
-  { id: 6,  name: 'Croissant',       price: 120, emoji: '🥐', cat: 'Food'   },
-  { id: 7,  name: 'Sandwich',        price: 180, emoji: '🥪', cat: 'Food'   },
-  { id: 8,  name: 'Muffin',          price: 90,  emoji: '🧁', cat: 'Food'   },
-  { id: 9,  name: 'Pancakes',        price: 220, emoji: '🥞', cat: 'Food'   },
-  { id: 10, name: 'Cheesecake',      price: 250, emoji: '🍰', cat: 'Snacks' },
-  { id: 11, name: 'Brownie',         price: 110, emoji: '🍫', cat: 'Snacks' },
-  { id: 12, name: 'Fruit Smoothie',  price: 160, emoji: '🍓', cat: 'Drinks' },
-];
+const PRODUCT_API = 'http://localhost:5000/api/products';
 
 const TABLES = [1,2,3,4,5,6,7,8];
-const CATS   = ['All', 'Coffee', 'Food', 'Snacks', 'Drinks'];
 
 export default function POS() {
   const { user, logout }        = useAuth();
   const navigate                = useNavigate();
+  const [menu, setMenu]         = useState([]);
+  const [loadingMenu, setLM]    = useState(true);
   const [cart, setCart]         = useState([]);
   const [table, setTable]       = useState(1);
   const [cat, setCat]           = useState('All');
   const [search, setSearch]     = useState('');
+
+  useEffect(() => {
+    (async () => {
+      try {
+        const res = await fetch(PRODUCT_API);
+        const data = await res.json();
+        if (Array.isArray(data)) setMenu(data);
+      } catch(e) { console.error(e); } finally { setLM(false); }
+    })();
+  }, []);
+
+  const CATS = ['All', ...['Coffee','Food','Snacks','Drinks','Other'].filter(c => menu.some(m => m.category === c))];
   const [payModal, setPayModal] = useState(false);
   const [payDone, setPayDone]   = useState(false);
   const [payMethod, setMethod]  = useState('cash');
@@ -44,18 +43,17 @@ export default function POS() {
     setTimeout(() => setToast({ msg: '', type: 'success' }), 3500);
   };
 
-  const filtered = MENU.filter(
-    m => (cat === 'All' || m.cat === cat) &&
+  const filtered = menu.filter(
+    m => (cat === 'All' || m.category === cat) &&
          m.name.toLowerCase().includes(search.toLowerCase())
   );
 
   const addItem = (item) => {
-    // If order already sent to kitchen, don't allow modification
     if (sentOrderId) return;
     setCart(prev => {
-      const ex = prev.find(c => c.id === item.id);
+      const ex = prev.find(c => c._id === item._id);
       return ex
-        ? prev.map(c => c.id === item.id ? { ...c, qty: c.qty + 1 } : c)
+        ? prev.map(c => c._id === item._id ? { ...c, qty: c.qty + 1 } : c)
         : [...prev, { ...item, qty: 1 }];
     });
   };
@@ -63,7 +61,7 @@ export default function POS() {
   const removeItem = (id) => {
     if (sentOrderId) return;
     setCart(prev =>
-      prev.map(c => c.id === id ? { ...c, qty: c.qty - 1 } : c).filter(c => c.qty > 0)
+      prev.map(c => c._id === id ? { ...c, qty: c.qty - 1 } : c).filter(c => c.qty > 0)
     );
   };
 
@@ -89,7 +87,7 @@ export default function POS() {
           Authorization:  `Bearer ${user?.token}`,
         },
         body: JSON.stringify({
-          items:       cart,
+          items:       cart.map(c=>({ id: c._id, name: c.name, qty: c.qty, price: c.price, emoji: c.emoji||'🍽️', cat: c.category })),
           tableNumber: table,
           subtotal,
           gst: tax,
@@ -124,7 +122,7 @@ export default function POS() {
             Authorization:  `Bearer ${user?.token}`,
           },
           body: JSON.stringify({
-            items:       cart,
+            items:       cart.map(c=>({ id: c._id, name: c.name, qty: c.qty, price: c.price, emoji: c.emoji||'🍽️', cat: c.category })),
             tableNumber: table,
             subtotal,
             gst: tax,
@@ -228,6 +226,7 @@ export default function POS() {
               <div style={{ fontSize: 10.5, color: '#78716c' }}>🧾 Cashier</div>
             </div>
           </div>
+          <Link to="/table-qr" style={s.qrNavBtn} title="View Table QR Codes">🔲 QR Codes</Link>
           <button onClick={handleLogout} style={s.logoutBtn}>Sign Out</button>
         </div>
       </header>
@@ -277,16 +276,18 @@ export default function POS() {
 
           {/* Menu Grid */}
           <div style={s.menuGrid}>
-            {filtered.length === 0 ? (
+            {loadingMenu ? (
+              <div style={s.emptyMenu}><p style={{ color:'#57534e' }}>Loading menu…</p></div>
+            ) : filtered.length === 0 ? (
               <div style={s.emptyMenu}>
                 <div style={{ fontSize: 40 }}>🔍</div>
-                <p>No items found</p>
+                <p>{menu.length === 0 ? 'No products added yet. Add via Admin → Products.' : 'No items found'}</p>
               </div>
             ) : filtered.map(item => {
-              const inCart = cart.find(c => c.id === item.id);
+              const inCart = cart.find(c => c._id === item._id);
               return (
                 <button
-                  key={item.id}
+                  key={item._id}
                   onClick={() => addItem(item)}
                   disabled={orderLocked}
                   style={{
@@ -297,9 +298,9 @@ export default function POS() {
                     cursor:  orderLocked ? 'not-allowed' : 'pointer',
                   }}
                 >
-                  <div style={s.menuEmoji}>{item.emoji}</div>
+                  <div style={s.menuEmoji}>{item.emoji||'🍽️'}</div>
                   <div style={s.menuName}>{item.name}</div>
-                  <div style={s.menuCat}>{item.cat}</div>
+                  <div style={s.menuCat}>{item.category}</div>
                   <div style={s.menuPrice}>₹{item.price}</div>
                   {inCart && (
                     <div style={s.qtyBadge}>{inCart.qty}</div>
@@ -335,15 +336,15 @@ export default function POS() {
                 </p>
               </div>
             ) : cart.map(item => (
-              <div key={item.id} style={s.cartItem}>
-                <span style={s.cartEmoji}>{item.emoji}</span>
+              <div key={item._id} style={s.cartItem}>
+                <span style={s.cartEmoji}>{item.emoji||'🍽️'}</span>
                 <div style={{ flex: 1 }}>
                   <div style={s.cartItemName}>{item.name}</div>
                   <div style={s.cartItemPrice}>₹{item.price} × {item.qty}</div>
                 </div>
                 {!orderLocked && (
                   <div style={s.qtyControl}>
-                    <button style={s.qtyBtn} onClick={() => removeItem(item.id)}>−</button>
+                    <button style={s.qtyBtn} onClick={() => removeItem(item._id)}>−</button>
                     <span style={s.qtyNum}>{item.qty}</span>
                     <button style={s.qtyBtn} onClick={() => addItem(item)}>+</button>
                   </div>
@@ -545,6 +546,13 @@ const s = {
     border: '1px solid rgba(255,255,255,0.12)',
     background: 'transparent', color: '#a8a29e',
     fontSize: 12, cursor: 'pointer', fontWeight: 500,
+  },
+  qrNavBtn: {
+    padding: '6px 14px', borderRadius: 8,
+    border: '1px solid rgba(167,139,250,0.3)',
+    background: 'rgba(167,139,250,0.08)', color: '#a78bfa',
+    fontSize: 12, fontWeight: 600, textDecoration: 'none',
+    display: 'flex', alignItems: 'center', gap: 4,
   },
 
   body: { display: 'flex', flex: 1, overflow: 'hidden' },

@@ -2,19 +2,9 @@ import { useState } from 'react';
 import { useNavigate, Link } from 'react-router-dom';
 import { signupApi } from '../api/authApi';
 
+// Only customer self-registration is allowed.
+// Admin accounts are created by a backend seeder or existing admin via the dashboard.
 const ROLES = [
-  {
-    key:    'admin',
-    icon:   '👑',
-    label:  'Café Owner / Admin',
-    desc:   'Manage staff, menu, products & reports',
-    color:  '#f59e0b',
-    shadow: 'rgba(245,158,11,0.25)',
-    bg:     '#fffbeb',
-    border: '#fcd34d',
-    tag:    'Full Access',
-    perks:  ['Staff management', 'Menu config', 'Sales reports'],
-  },
   {
     key:    'user',
     icon:   '☕',

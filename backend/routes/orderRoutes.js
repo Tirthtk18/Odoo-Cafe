@@ -2,16 +2,15 @@ const router = require('express').Router();
 const ctrl   = require('../controllers/orderController');
 const { protect, adminOnly } = require('../middleware/authMiddleware');
 
-// Customer places order
-router.post('/',         protect, ctrl.createOrder);
+// Public routes (no auth)
+router.post('/public',      ctrl.createPublicOrder);
+router.get('/by-ids',       ctrl.getOrdersByIds);   // guest session polling
 
-// Admin & Kitchen view all orders
-router.get('/',          protect, ctrl.getOrders);
-
-// Kitchen/Admin advances order status
+// Authenticated routes
+router.post('/',            protect, ctrl.createOrder);
+router.get('/my',           protect, ctrl.getMyOrders);
+router.get('/',             protect, ctrl.getOrders);
 router.patch('/:id/status', protect, ctrl.updateOrderStatus);
-
-// Admin deletes an order
-router.delete('/:id',    protect, adminOnly, ctrl.deleteOrder);
+router.delete('/:id',       protect, adminOnly, ctrl.deleteOrder);
 
 module.exports = router;
