@@ -116,18 +116,23 @@ async function sendReceiptEmail(toEmail, order) {
 // ─── POST /api/orders ─────────────────────────────────────────────────────────
 exports.createOrder = async (req, res) => {
   try {
-    const { items, tableNumber, subtotal, gst, total, paymentMethod } = req.body;
+    const { items, tableNumber, subtotal, gst, total, paymentMethod,
+            customerName, customerEmail } = req.body;
     if (!items || items.length === 0)
       return res.status(400).json({ message: 'Order must have at least one item' });
 
+    // Cashier can override name/email for the receipt
+    const name  = customerName  || req.user.name;
+    const email = customerEmail || req.user.email;
+
     const order = await Order.create({
-      customer: { _id: req.user._id, name: req.user.name, email: req.user.email },
+      customer: { _id: req.user._id, name, email },
       items, tableNumber: tableNumber || 1, subtotal, gst, total, status: 'new',
       paymentMethod: paymentMethod || 'cash',
     });
 
-    // Send receipt to logged-in user's email
-    sendReceiptEmail(req.user.email, order);
+    // Send receipt to customer email
+    sendReceiptEmail(email, order);
 
     res.status(201).json(order);
   } catch (err) {
@@ -231,6 +236,78 @@ exports.deleteOrder = async (req, res) => {
     await Order.findByIdAndDelete(req.params.id);
     res.json({ message: 'Order removed' });
   } catch (err) {
+    res.status(500).json({ message: 'Server error' });
+  }
+};
+
+// ─── GET /api/orders/report ───────────────────────────────────────────────────
+exports.getReport = async (req, res) => {
+  try {
+    const { from, to } = req.query;
+    const dateFilter = {};
+    if (from) dateFilter.$gte = new Date(from);
+    if (to)   dateFilter.$lte = new Date(new Date(to).setHours(23,59,59,999));
+    const match = Object.keys(dateFilter).length ? { createdAt: dateFilter } : {};
+
+    const orders = await Order.find(match).sort({ createdAt: -1 });
+
+    // ── Aggregates ──
+    const totalOrders  = orders.length;
+    const totalRevenue = orders.reduce((s, o) => s + (o.total || 0), 0);
+    const avgOrder     = totalOrders ? Math.round(totalRevenue / totalOrders) : 0;
+
+    // By status
+    const byStatus = { new: 0, preparing: 0, ready: 0, served: 0 };
+    orders.forEach(o => { if (byStatus[o.status] !== undefined) byStatus[o.status]++; });
+
+    // By payment method
+    const byPayment = {};
+    orders.forEach(o => {
+      const m = o.paymentMethod || 'pending';
+      byPayment[m] = (byPayment[m] || 0) + 1;
+    });
+
+    // Daily revenue — last 30 days
+    const days = {};
+    const now = new Date();
+    for (let i = 29; i >= 0; i--) {
+      const d = new Date(now); d.setDate(d.getDate() - i);
+      const key = d.toISOString().slice(0, 10);
+      days[key] = 0;
+    }
+    orders.forEach(o => {
+      const key = new Date(o.createdAt).toISOString().slice(0, 10);
+      if (days[key] !== undefined) days[key] += o.total || 0;
+    });
+    const dailyRevenue = Object.entries(days).map(([date, revenue]) => ({ date, revenue }));
+
+    // Top items
+    const itemMap = {};
+    orders.forEach(o => {
+      o.items.forEach(item => {
+        if (!itemMap[item.name]) itemMap[item.name] = { name: item.name, emoji: item.emoji || '🍽️', qty: 0, revenue: 0 };
+        itemMap[item.name].qty     += item.qty;
+        itemMap[item.name].revenue += item.price * item.qty;
+      });
+    });
+    const topItems = Object.values(itemMap).sort((a, b) => b.qty - a.qty).slice(0, 10);
+
+    // Recent orders (last 10 for the report table)
+    const recentOrders = orders.slice(0, 20).map(o => ({
+      _id: o._id,
+      orderNumber: o.orderNumber,
+      customerName: o.customer?.name,
+      customerEmail: o.customer?.email,
+      tableNumber: o.tableNumber,
+      total: o.total,
+      paymentMethod: o.paymentMethod,
+      status: o.status,
+      createdAt: o.createdAt,
+    }));
+
+    res.json({ totalOrders, totalRevenue, avgOrder, byStatus, byPayment, dailyRevenue, topItems, recentOrders });
+  } catch (err) {
+    console.error('GetReport error:', err);
     res.status(500).json({ message: 'Server error' });
   }
 };

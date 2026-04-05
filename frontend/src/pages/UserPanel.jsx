@@ -1,6 +1,7 @@
-import { useState, useEffect, useRef } from 'react';
+import { useState, useEffect, useRef, useCallback } from 'react';
 import { useAuth } from '../context/AuthContext';
 import { useNavigate } from 'react-router-dom';
+import jsQR from 'jsqr';
 
 const API = 'http://localhost:5000/api';
 
@@ -280,6 +281,262 @@ function OrderCard({ order }) {
   );
 }
 
+/* ─── QR Scanner Modal ─── */
+function QRScannerModal({ onScanned, onClose }) {
+  const videoRef  = useRef(null);
+  const canvasRef = useRef(null);
+  const streamRef = useRef(null);
+  const rafRef    = useRef(null);
+  const fileInputRef = useRef(null);
+  const [error, setError] = useState('');
+  const [scanning, setScanning] = useState(true);
+  const [mode, setMode] = useState('camera'); // 'camera' | 'upload'
+  const [uploadError, setUploadError] = useState('');
+  const [uploadPreview, setUploadPreview] = useState(null);
+  const [uploadResult, setUploadResult] = useState(null); // 'success' | 'notfound' | null
+
+  const stopCamera = useCallback(() => {
+    if (streamRef.current) {
+      streamRef.current.getTracks().forEach(t => t.stop());
+      streamRef.current = null;
+    }
+    if (rafRef.current) cancelAnimationFrame(rafRef.current);
+  }, []);
+
+  const tick = useCallback(() => {
+    const video  = videoRef.current;
+    const canvas = canvasRef.current;
+    if (!video || !canvas || video.readyState !== video.HAVE_ENOUGH_DATA) {
+      rafRef.current = requestAnimationFrame(tick);
+      return;
+    }
+    canvas.width  = video.videoWidth;
+    canvas.height = video.videoHeight;
+    const ctx = canvas.getContext('2d');
+    ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
+    const imageData = ctx.getImageData(0, 0, canvas.width, canvas.height);
+    const code = jsQR(imageData.data, imageData.width, imageData.height, { inversionAttempts: 'dontInvert' });
+    if (code && code.data) {
+      const match = code.data.match(/\/table\/(\d+)/);
+      if (match) {
+        setScanning(false);
+        stopCamera();
+        onScanned(parseInt(match[1], 10), code.data);
+        return;
+      }
+    }
+    rafRef.current = requestAnimationFrame(tick);
+  }, [onScanned, stopCamera]);
+
+  useEffect(() => {
+    if (mode !== 'camera') return;
+    (async () => {
+      try {
+        const stream = await navigator.mediaDevices.getUserMedia({
+          video: { facingMode: 'environment' },
+        });
+        streamRef.current = stream;
+        if (videoRef.current) {
+          videoRef.current.srcObject = stream;
+          videoRef.current.play();
+          rafRef.current = requestAnimationFrame(tick);
+        }
+      } catch (e) {
+        setError('Camera access denied. Please allow camera permission or use the Upload option.');
+      }
+    })();
+    return () => stopCamera();
+  }, [mode, tick, stopCamera]);
+
+  // Switch mode — stop camera if switching away
+  const switchMode = (m) => {
+    if (m === 'upload') stopCamera();
+    setError('');
+    setUploadError('');
+    setUploadPreview(null);
+    setUploadResult(null);
+    setMode(m);
+  };
+
+  // Decode QR from uploaded image file
+  const handleFileUpload = (e) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    setUploadError('');
+    setUploadResult(null);
+
+    const reader = new FileReader();
+    reader.onload = (ev) => {
+      const src = ev.target.result;
+      setUploadPreview(src);
+      const img = new Image();
+      img.onload = () => {
+        const tempCanvas = document.createElement('canvas');
+        tempCanvas.width  = img.width;
+        tempCanvas.height = img.height;
+        const ctx = tempCanvas.getContext('2d');
+        ctx.drawImage(img, 0, 0);
+        const imageData = ctx.getImageData(0, 0, img.width, img.height);
+        const code = jsQR(imageData.data, imageData.width, imageData.height, { inversionAttempts: 'attemptBoth' });
+        if (code && code.data) {
+          const match = code.data.match(/\/table\/(\d+)/);
+          if (match) {
+            setUploadResult('success');
+            setTimeout(() => {
+              onScanned(parseInt(match[1], 10), code.data);
+            }, 800);
+          } else {
+            setUploadResult('notfound');
+            setUploadError(`QR decoded but no table found. Content: "${code.data}"`);
+          }
+        } else {
+          setUploadResult('notfound');
+          setUploadError('Could not read a QR code from this image. Please use a clearer photo of the table QR.');
+        }
+      };
+      img.onerror = () => setUploadError('Failed to load image. Please try a different file.');
+      img.src = src;
+    };
+    reader.readAsDataURL(file);
+  };
+
+  return (
+    <div style={qs.overlay}>
+      <div style={qs.box} className="anim-popIn">
+        {/* Header */}
+        <div style={qs.head}>
+          <div>
+            <div style={qs.title}>📷 Scan Table QR</div>
+            <div style={qs.sub}>Use camera or upload a QR image from your device</div>
+          </div>
+          <button onClick={() => { stopCamera(); onClose(); }} style={qs.closeX}>✕</button>
+        </div>
+
+        {/* Mode Tabs */}
+        <div style={qs.modeTabs}>
+          <button
+            onClick={() => switchMode('camera')}
+            style={{ ...qs.modeTabBtn, background: mode === 'camera' ? '#7c3aed' : 'transparent', color: mode === 'camera' ? '#fff' : '#78716c' }}
+          >📷 Live Camera</button>
+          <button
+            onClick={() => switchMode('upload')}
+            style={{ ...qs.modeTabBtn, background: mode === 'upload' ? '#7c3aed' : 'transparent', color: mode === 'upload' ? '#fff' : '#78716c' }}
+          >🖼️ Upload PNG</button>
+        </div>
+
+        {/* ── CAMERA MODE ── */}
+        {mode === 'camera' && (
+          <>
+            {error ? (
+              <div style={qs.errBox}>⚠ {error}</div>
+            ) : (
+              <div style={qs.videoWrap}>
+                <video ref={videoRef} style={qs.video} muted playsInline />
+                <canvas ref={canvasRef} style={{ display: 'none' }} />
+                {scanning && (
+                  <div style={qs.scanOverlay}>
+                    <div style={qs.scanCornerTL} />
+                    <div style={qs.scanCornerTR} />
+                    <div style={qs.scanCornerBL} />
+                    <div style={qs.scanCornerBR} />
+                    <div style={qs.scanLine} className="scan-line" />
+                  </div>
+                )}
+              </div>
+            )}
+            <p style={{ textAlign:'center', fontSize:12, color:'#78716c', marginTop:12 }}>
+              {scanning ? '🔍 Scanning for QR code…' : '✅ QR code detected!'}
+            </p>
+          </>
+        )}
+
+        {/* ── UPLOAD MODE ── */}
+        {mode === 'upload' && (
+          <>
+            {/* Upload drop zone */}
+            <div
+              onClick={() => fileInputRef.current?.click()}
+              style={{
+                border: '2px dashed #c4b5fd',
+                borderRadius: 16,
+                padding: '28px 16px',
+                textAlign: 'center',
+                cursor: 'pointer',
+                background: uploadPreview ? '#f5f3ff' : '#faf5ff',
+                transition: 'all .2s',
+                marginBottom: 14,
+                position: 'relative',
+                overflow: 'hidden',
+              }}
+            >
+              {uploadPreview ? (
+                <>
+                  <img
+                    src={uploadPreview}
+                    alt="QR preview"
+                    style={{ maxWidth: '100%', maxHeight: 180, borderRadius: 10, objectFit: 'contain', display: 'block', margin: '0 auto 12px' }}
+                  />
+                  {uploadResult === 'success' && (
+                    <div style={{ background: '#f0fdf4', border: '1px solid #bbf7d0', borderRadius: 10, padding: '10px', fontSize: 13, color: '#16a34a', fontWeight: 700 }}>✅ Table QR detected!</div>
+                  )}
+                  {uploadResult === 'notfound' && (
+                    <div style={{ background: '#fef2f2', border: '1px solid #fecaca', borderRadius: 10, padding: '10px', fontSize: 12, color: '#dc2626' }}>❌ {uploadError}</div>
+                  )}
+                  {!uploadResult && <div style={{ fontSize: 12, color: '#78716c' }}>🔍 Decoding QR…</div>}
+                  <div style={{ fontSize: 11, color: '#a8a29e', marginTop: 8 }}>Tap to choose a different image</div>
+                </>
+              ) : (
+                <>
+                  <div style={{ fontSize: 48, marginBottom: 10 }}>🖼️</div>
+                  <div style={{ fontSize: 14, fontWeight: 700, color: '#7c3aed', marginBottom: 4 }}>Tap to upload QR image</div>
+                  <div style={{ fontSize: 12, color: '#a8a29e' }}>PNG, JPG • Photo of the table QR code</div>
+                </>
+              )}
+            </div>
+            <input
+              ref={fileInputRef}
+              type="file"
+              accept="image/*"
+              style={{ display: 'none' }}
+              onChange={handleFileUpload}
+            />
+            {/* Retry button if not found */}
+            {uploadResult === 'notfound' && (
+              <button
+                onClick={() => { setUploadPreview(null); setUploadResult(null); setUploadError(''); fileInputRef.current?.click(); }}
+                style={{ ...qs.cancelBtn, background: '#7c3aed', color: '#fff', border: 'none', marginBottom: 8 }}
+              >Try Another Image</button>
+            )}
+          </>
+        )}
+
+        <button onClick={() => { stopCamera(); onClose(); }} style={qs.cancelBtn}>Cancel</button>
+      </div>
+    </div>
+  );
+}
+
+const qs = {
+  overlay:     { position:'fixed', inset:0, background:'rgba(0,0,0,0.75)', backdropFilter:'blur(8px)', display:'flex', alignItems:'center', justifyContent:'center', zIndex:300, padding:20 },
+  box:         { background:'#fff', borderRadius:24, padding:'28px', width:'100%', maxWidth:420, boxShadow:'0 24px 80px rgba(0,0,0,0.35)', fontFamily:'Inter,sans-serif', maxHeight:'90vh', overflowY:'auto' },
+  head:        { display:'flex', alignItems:'flex-start', justifyContent:'space-between', marginBottom:16 },
+  title:       { fontSize:18, fontWeight:800, color:'#1c1917', marginBottom:3 },
+  sub:         { fontSize:12, color:'#78716c' },
+  closeX:      { width:32, height:32, borderRadius:8, border:'1.5px solid #e7e5e4', background:'#fafaf9', cursor:'pointer', fontSize:14, display:'flex', alignItems:'center', justifyContent:'center', flexShrink:0 },
+  modeTabs:    { display:'flex', background:'#f3e8ff', borderRadius:12, padding:4, marginBottom:16, gap:4 },
+  modeTabBtn:  { flex:1, padding:'8px 12px', borderRadius:9, border:'none', fontSize:13, fontWeight:600, cursor:'pointer', transition:'all .15s', fontFamily:'Inter,sans-serif' },
+  videoWrap:   { position:'relative', borderRadius:16, overflow:'hidden', background:'#000', aspectRatio:'1', width:'100%', marginBottom:4 },
+  video:       { width:'100%', height:'100%', objectFit:'cover', display:'block' },
+  scanOverlay: { position:'absolute', inset:0, display:'flex', alignItems:'center', justifyContent:'center', pointerEvents:'none' },
+  scanCornerTL:{ position:'absolute', top:32, left:32, width:32, height:32, borderTop:'3px solid #7c3aed', borderLeft:'3px solid #7c3aed', borderRadius:'4px 0 0 0' },
+  scanCornerTR:{ position:'absolute', top:32, right:32, width:32, height:32, borderTop:'3px solid #7c3aed', borderRight:'3px solid #7c3aed', borderRadius:'0 4px 0 0' },
+  scanCornerBL:{ position:'absolute', bottom:32, left:32, width:32, height:32, borderBottom:'3px solid #7c3aed', borderLeft:'3px solid #7c3aed', borderRadius:'0 0 0 4px' },
+  scanCornerBR:{ position:'absolute', bottom:32, right:32, width:32, height:32, borderBottom:'3px solid #7c3aed', borderRight:'3px solid #7c3aed', borderRadius:'0 0 4px 0' },
+  scanLine:    { position:'absolute', left:'15%', right:'15%', height:2, background:'linear-gradient(90deg,transparent,#7c3aed,transparent)', top:'50%' },
+  errBox:      { background:'#fef2f2', border:'1px solid #fecaca', borderRadius:12, padding:'14px', fontSize:13, color:'#dc2626', marginBottom:16, textAlign:'center' },
+  cancelBtn:   { width:'100%', padding:'11px', borderRadius:12, border:'1.5px solid #e9d5ff', background:'transparent', color:'#7c3aed', fontSize:13, cursor:'pointer', fontWeight:600, marginTop:10 },
+};
+
 /* ═══ MAIN COMPONENT ═══ */
 export default function UserPanel() {
   const { user, logout } = useAuth();
@@ -298,6 +555,9 @@ export default function UserPanel() {
   const [loadingOrders, setLO]= useState(false);
   const [filterStatus, setFS] = useState('all');
   const pollRef = useRef(null);
+  // QR scanner state
+  const [showScanner, setShowScanner] = useState(false);
+  const [scannedTable, setScannedTable] = useState(null);
 
   const showToast = (msg, type='success') => { setToast({msg,type}); setTimeout(()=>setToast({msg:'',type:'success'}),3500); };
 
@@ -338,11 +598,15 @@ export default function UserPanel() {
       const r = await fetch(`${API}/orders`,{
         method:'POST',
         headers:{'Content-Type':'application/json',Authorization:`Bearer ${user?.token}`},
-        body:JSON.stringify({ items:cart.map(c=>({id:c._id,name:c.name,qty:c.qty,price:c.price,emoji:c.emoji||'🍽️',cat:c.category})), subtotal,gst,total,paymentMethod:method }),
+        body:JSON.stringify({
+          items:cart.map(c=>({id:c._id,name:c.name,qty:c.qty,price:c.price,emoji:c.emoji||'🍽️',cat:c.category})),
+          subtotal, gst, total, paymentMethod:method,
+          ...(scannedTable ? { tableNumber: scannedTable } : {}),
+        }),
       });
       const data = await r.json();
-      if(r.ok){ setCart([]); setSP(false); setLast(data); setActiveTab('orders'); fetchOrders(); showToast(`🎉 Order #${data.orderNumber||''} placed!`); }
-      else showToast(data.message||'Failed to place order','error');
+      if(r.ok){ setCart([]); setSP(false); setLast(data); setActiveTab('orders'); fetchOrders(); showToast(`🎉 Order #${data.orderNumber||''} placed! ${scannedTable?`(Table ${scannedTable})`:''}`);
+      } else showToast(data.message||'Failed to place order','error');
     }catch{ showToast('Network error','error'); }
     finally{ setPlacing(false); }
   };
@@ -362,6 +626,18 @@ export default function UserPanel() {
       {/* Payment Modal */}
       {showPay && <PaymentModal amount={total} onSuccess={method=>{ setSP(false); placeOrder(method); }} onClose={()=>setSP(false)}/>}
 
+      {/* QR Scanner Modal */}
+      {showScanner && (
+        <QRScannerModal
+          onScanned={(tableNo) => {
+            setScannedTable(tableNo);
+            setShowScanner(false);
+            showToast(`✅ Table ${tableNo} detected! Your orders will be linked to this table.`);
+          }}
+          onClose={() => setShowScanner(false)}
+        />
+      )}
+
       {/* Header */}
       <header style={s.header}>
         <div style={s.headerLeft}>
@@ -372,20 +648,26 @@ export default function UserPanel() {
           </div>
         </div>
         <div style={s.tabs}>
-          {[{key:'menu',icon:'🍽️',label:'Menu'},{key:'orders',icon:'📋',label:`My Orders${orders.length?` (${orders.length})`:''}` }].map(t=>(
+          {[{key:'menu',icon:'🍽️',label:'Menu'},{key:'orders',icon:'📋',label:`My Orders${orders.length?` (${orders.length})`:''}`}].map(t=>(
             <button key={t.key} onClick={()=>setActiveTab(t.key)}
               style={{...s.tabBtn,background:activeTab===t.key?'#7c3aed':'transparent',color:activeTab===t.key?'#fff':'#78716c',position:'relative'}}>
               {t.icon} {t.label}
               {t.key==='orders'&&activeOrders.length>0&&<span style={{ position:'absolute',top:-4,right:-4,width:8,height:8,borderRadius:'50%',background:'#22c55e',animation:'pulse 1.5s infinite' }}/>}
             </button>
           ))}
+          {/* QR Scan Table button */}
+          <button onClick={() => setShowScanner(true)}
+            style={{...s.tabBtn, background: scannedTable?'#16a34a':'#f3e8ff', color: scannedTable?'#fff':'#7c3aed', border: scannedTable?'none':'1.5px solid #e9d5ff', position:'relative'}}>
+            {scannedTable ? `🪑 Table ${scannedTable}` : '📷 Scan Table'}
+            {scannedTable && <button onClick={e=>{e.stopPropagation();setScannedTable(null);}} style={{ position:'absolute',top:-6,right:-6,width:18,height:18,borderRadius:'50%',background:'#dc2626',border:'none',color:'#fff',fontSize:10,cursor:'pointer',display:'flex',alignItems:'center',justifyContent:'center' }}>✕</button>}
+          </button>
         </div>
         <div style={s.headerRight}>
           <div style={s.userGreet}>
             <div style={s.userAvatar}>{user?.name?.[0]?.toUpperCase()}</div>
             <div>
               <div style={s.userName}>{user?.name}</div>
-              <div style={s.userRole}>☕ Customer</div>
+              <div style={s.userRole}>{scannedTable ? `🪑 Table ${scannedTable}` : '☕ Customer'}</div>
             </div>
           </div>
           <button onClick={()=>{logout();navigate('/login');}} style={s.logoutBtn}>Sign Out</button>
@@ -568,6 +850,8 @@ export default function UserPanel() {
         @keyframes pulse { 0%,100%{opacity:1;transform:scale(1);} 50%{opacity:0.5;transform:scale(0.85);} }
         .anim-popIn { animation: popIn 0.25s cubic-bezier(.34,1.56,.64,1); }
         @keyframes popIn { from{opacity:0;transform:scale(0.9)} to{opacity:1;transform:scale(1)} }
+        .scan-line { animation: scanMove 1.8s ease-in-out infinite; }
+        @keyframes scanMove { 0%,100%{top:20%} 50%{top:80%} }
       `}</style>
     </div>
   );

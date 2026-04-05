@@ -3,6 +3,11 @@ import { useNavigate } from 'react-router-dom';
 import { useAuth } from '../context/AuthContext';
 import { getStaffApi, createStaffApi, deleteStaffApi } from '../api/authApi';
 import { QRCodeCanvas } from 'qrcode.react';
+import {
+  AreaChart, Area, BarChart, Bar, PieChart, Pie, Cell,
+  XAxis, YAxis, CartesianGrid, Tooltip, Legend,
+  ResponsiveContainer
+} from 'recharts';
 
 const API = 'http://localhost:5000/api';
 const POLL_MS = 5_000;
@@ -15,6 +20,7 @@ const ROLE_COLORS = {
 const NAV_ITEMS = [
   { key: 'overview',  icon: '📊', label: 'Overview'  },
   { key: 'orders',    icon: '📋', label: 'Orders'    },
+  { key: 'reports',   icon: '📈', label: 'Reports'   },
   { key: 'products',  icon: '🍽️', label: 'Products'  },
   { key: 'tables',    icon: '🪑', label: 'Tables'    },
   { key: 'staff',     icon: '👥', label: 'Staff'     },
@@ -80,6 +86,12 @@ export default function Dashboard() {
   const [savingTable, setSavingT]     = useState(false);
   const [deletingTableId, setDelT]    = useState(null);
 
+  // ── Reports ────────────────────────────────────────────────────────────────
+  const [report, setReport]           = useState(null);
+  const [loadingReport, setLR]        = useState(false);
+  const [reportFrom, setReportFrom]   = useState('');
+  const [reportTo, setReportTo]       = useState('');
+
   // ── Fetch helpers ─────────────────────────────────────────────────────────
   const fetchStaff = async () => {
     setLS(true);
@@ -114,6 +126,18 @@ export default function Dashboard() {
     } catch(e){ console.error(e); } finally { setLT(false); }
   };
 
+  const fetchReport = async (from = reportFrom, to = reportTo) => {
+    setLR(true);
+    try {
+      const params = new URLSearchParams();
+      if (from) params.set('from', from);
+      if (to)   params.set('to',   to);
+      const res  = await fetch(`${API}/orders/report?${params}`, { headers: { Authorization: `Bearer ${token}` } });
+      const data = await res.json();
+      setReport(data);
+    } catch(e){ console.error(e); } finally { setLR(false); }
+  };
+
   useEffect(() => {
     fetchStaff();
     fetchOrders();
@@ -122,6 +146,11 @@ export default function Dashboard() {
     orderPollRef.current = setInterval(fetchOrders, POLL_MS);
     return () => clearInterval(orderPollRef.current);
   }, []);
+
+  // Fetch report when switching to reports tab
+  useEffect(() => {
+    if (nav === 'reports') fetchReport();
+  }, [nav]); // eslint-disable-line
 
   // ── Order actions ─────────────────────────────────────────────────────────
   const handleDeleteOrder = async (id) => {
@@ -214,10 +243,84 @@ export default function Dashboard() {
     setDelT(null); showToastMsg(`🗑 Table ${num} removed`, 'error'); fetchTables();
   };
   const downloadQR = (tableNumber) => {
-    const canvas = document.getElementById(`qr-canvas-${tableNumber}`);
-    if (!canvas) return;
-    const url = canvas.toDataURL('image/png');
-    const a = document.createElement('a'); a.href = url; a.download = `table-${tableNumber}-qr.png`; a.click();
+    const srcCanvas = document.getElementById(`qr-canvas-${tableNumber}`);
+    if (!srcCanvas) return;
+
+    // Build a branded PNG: 600 × 680
+    const W = 600, H = 680;
+    const out = document.createElement('canvas');
+    out.width = W; out.height = H;
+    const ctx = out.getContext('2d');
+
+    // Background gradient
+    const grad = ctx.createLinearGradient(0, 0, W, H);
+    grad.addColorStop(0, '#f5f3ff');
+    grad.addColorStop(1, '#ede9fe');
+    ctx.fillStyle = grad;
+    ctx.roundRect(0, 0, W, H, 28);
+    ctx.fill();
+
+    // Top accent bar
+    const bar = ctx.createLinearGradient(0, 0, W, 0);
+    bar.addColorStop(0, '#7c3aed');
+    bar.addColorStop(1, '#6d28d9');
+    ctx.fillStyle = bar;
+    ctx.roundRect(0, 0, W, 80, [28, 28, 0, 0]);
+    ctx.fill();
+
+    // ☕ Emoji + Café name
+    ctx.font = 'bold 28px Arial';
+    ctx.fillStyle = '#fff';
+    ctx.textAlign = 'center';
+    ctx.fillText('☕  POS Café', W / 2, 50);
+
+    // Table label
+    ctx.font = 'bold 52px Arial';
+    ctx.fillStyle = '#1c1917';
+    ctx.fillText(`Table ${tableNumber}`, W / 2, 160);
+
+    // QR box shadow
+    const qx = (W - 280) / 2, qy = 190;
+    ctx.shadowColor = 'rgba(124,58,237,0.18)';
+    ctx.shadowBlur = 24;
+    ctx.fillStyle = '#fff';
+    ctx.roundRect(qx - 20, qy - 20, 320, 320, 20);
+    ctx.fill();
+    ctx.shadowBlur = 0;
+
+    // Draw actual QR canvas
+    ctx.drawImage(srcCanvas, qx, qy, 280, 280);
+
+    // Divider
+    ctx.strokeStyle = '#e9d5ff';
+    ctx.lineWidth = 1.5;
+    ctx.beginPath();
+    ctx.moveTo(60, 540); ctx.lineTo(W - 60, 540);
+    ctx.stroke();
+
+    // URL text
+    const urlText = `${FRONTEND_URL}/table/${tableNumber}`;
+    ctx.font = '15px monospace';
+    ctx.fillStyle = '#7c3aed';
+    ctx.textAlign = 'center';
+    ctx.fillText(urlText, W / 2, 575);
+
+    // Bottom hint
+    ctx.font = '14px Arial';
+    ctx.fillStyle = '#78716c';
+    ctx.fillText('Scan to browse menu & place order', W / 2, 615);
+
+    // Download — must append to DOM so browser respects the filename
+    out.toBlob((blob) => {
+      const blobUrl = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = blobUrl;
+      a.download = `table-${tableNumber}-qr.png`;
+      document.body.appendChild(a);
+      a.click();
+      document.body.removeChild(a);
+      URL.revokeObjectURL(blobUrl);
+    }, 'image/png');
   };
 
   const cashierCount = staff.filter(s => s.role === 'cashier').length;
@@ -311,6 +414,240 @@ export default function Dashboard() {
             </div>
           </div>
         )}
+
+        {/* ── Reports Tab ── */}
+        {nav === 'reports' && (() => {
+          /* ── Custom Tooltip for Area/Bar charts ── */
+          const RevenueTooltip = ({ active, payload, label }) => {
+            if (!active || !payload?.length) return null;
+            return (
+              <div style={{ background:'#1c1917', borderRadius:10, padding:'10px 14px', boxShadow:'0 8px 24px rgba(0,0,0,0.25)', border:'1px solid rgba(255,255,255,0.08)' }}>
+                <div style={{ fontSize:11, color:'#a8a29e', marginBottom:4 }}>{label}</div>
+                <div style={{ fontSize:16, fontWeight:800, color:'#a78bfa' }}>₹{payload[0]?.value?.toLocaleString('en-IN')}</div>
+              </div>
+            );
+          };
+
+          const BarTooltip = ({ active, payload }) => {
+            if (!active || !payload?.length) return null;
+            return (
+              <div style={{ background:'#1c1917', borderRadius:10, padding:'10px 14px', boxShadow:'0 8px 24px rgba(0,0,0,0.25)', border:'1px solid rgba(255,255,255,0.08)' }}>
+                <div style={{ fontSize:13, fontWeight:700, color:'#fff', marginBottom:2 }}>{payload[0]?.payload?.name}</div>
+                <div style={{ fontSize:12, color:'#a78bfa' }}>Qty: <strong>{payload[0]?.payload?.qty}</strong></div>
+                <div style={{ fontSize:12, color:'#34d399' }}>Revenue: <strong>₹{payload[0]?.payload?.revenue}</strong></div>
+              </div>
+            );
+          };
+
+          /* Payment Donut data */
+          const PAY_COLOR_MAP = { cash:'#22c55e', upi:'#6366f1', card:'#f59e0b', fake_pay:'#f59e0b', pending:'#a8a29e' };
+          const PAY_ICON_MAP  = { cash:'💵', upi:'📱', card:'💳', fake_pay:'💳', pending:'⏳' };
+          const payData = Object.entries(report?.byPayment||{}).map(([k,v]) => ({ name: k.charAt(0).toUpperCase()+k.slice(1), value: v, color: PAY_COLOR_MAP[k]||'#78716c', icon: PAY_ICON_MAP[k]||'💰' }));
+
+          /* Status Donut data */
+          const STATUS_COLORS = { new:'#ef4444', preparing:'#f59e0b', ready:'#22c55e', served:'#38bdf8' };
+          const statusData = Object.entries(report?.byStatus||{}).filter(([,v])=>v>0).map(([k,v]) => ({ name: k.charAt(0).toUpperCase()+k.slice(1), value: v, color: STATUS_COLORS[k]||'#a8a29e' }));
+
+          /* Revenue area chart data — last 14 days */
+          const revData = (report?.dailyRevenue||[]).slice(-14).map(d => ({ date: d.date.slice(5), revenue: d.revenue }));
+
+          /* Top Items horizontal bar data */
+          const topBarData = (report?.topItems||[]).slice(0,8).map(i => ({ name: `${i.emoji} ${i.name}`, qty: i.qty, revenue: i.revenue }));
+
+          return (
+          <div className="anim-fadeUp">
+            {/* Header */}
+            <div style={s.pageHead}>
+              <div><h1 style={s.pageTitle}>Sales Report 📈</h1><p style={s.pageSub}>Revenue analytics and order insights.</p></div>
+              <div style={{ display:'flex', gap:10, alignItems:'center', flexWrap:'wrap' }}>
+                <input type="date" value={reportFrom} onChange={e=>setReportFrom(e.target.value)} style={{ padding:'8px 12px', borderRadius:8, border:'1.5px solid #e7e5e4', fontSize:13, fontFamily:'Inter,sans-serif', color:'#1c1917' }} />
+                <span style={{ fontSize:13, color:'#a8a29e' }}>to</span>
+                <input type="date" value={reportTo} onChange={e=>setReportTo(e.target.value)} style={{ padding:'8px 12px', borderRadius:8, border:'1.5px solid #e7e5e4', fontSize:13, fontFamily:'Inter,sans-serif', color:'#1c1917' }} />
+                <button onClick={()=>fetchReport()} style={{ ...s.addBtn, background:'#7c3aed' }}>📅 Apply</button>
+                <button onClick={()=>{ setReportFrom(''); setReportTo(''); fetchReport('',''); }} style={{ ...s.addBtn, background:'#f5f5f4', color:'#44403c', boxShadow:'none', border:'1px solid #e7e5e4' }}>Reset</button>
+              </div>
+            </div>
+
+            {loadingReport ? (
+              <div style={s.emptyState}><p style={{ color:'#78716c' }}>Loading report…</p></div>
+            ) : !report ? (
+              <div style={s.emptyState}><div style={{ fontSize:56 }}>📊</div><p style={{ color:'#78716c', marginTop:12 }}>No data yet</p></div>
+            ) : (
+              <>
+                {/* ─ KPI Cards ─ */}
+                <div style={{ display:'grid', gridTemplateColumns:'repeat(4,1fr)', gap:16, marginBottom:24 }}>
+                  {[
+                    { icon:'💰', label:'Total Revenue',   value:`₹${report.totalRevenue.toLocaleString('en-IN')}`, color:'#7c3aed', bg:'#f5f3ff' },
+                    { icon:'📋', label:'Total Orders',    value:report.totalOrders,  color:'#1c1917', bg:'#fafaf9' },
+                    { icon:'📊', label:'Avg Order Value', value:`₹${report.avgOrder}`, color:'#f59e0b', bg:'#fffbeb' },
+                    { icon:'✅', label:'Served Orders',   value:report.byStatus?.served||0, color:'#22c55e', bg:'#f0fdf4' },
+                  ].map(k => (
+                    <div key={k.label} style={{ background:'#fff', borderRadius:18, padding:'22px 24px', boxShadow:'0 2px 16px rgba(0,0,0,0.06)', border:'1px solid #ece9e6', display:'flex', flexDirection:'column', gap:8 }}>
+                      <div style={{ width:42, height:42, borderRadius:12, background:k.bg, display:'flex', alignItems:'center', justifyContent:'center', fontSize:20 }}>{k.icon}</div>
+                      <div style={{ fontSize:28, fontWeight:900, color:k.color, letterSpacing:'-0.04em', lineHeight:1 }}>{k.value}</div>
+                      <div style={{ fontSize:12, fontWeight:600, color:'#a8a29e', textTransform:'uppercase', letterSpacing:'0.06em' }}>{k.label}</div>
+                    </div>
+                  ))}
+                </div>
+
+                {/* ─ Row 1: Area Chart (full width) ─ */}
+                <div style={{ background:'#fff', borderRadius:18, padding:'24px 28px 18px', boxShadow:'0 2px 16px rgba(0,0,0,0.06)', border:'1px solid #ece9e6', marginBottom:20 }}>
+                  <div style={{ display:'flex', justifyContent:'space-between', alignItems:'center', marginBottom:20 }}>
+                    <div>
+                      <div style={{ fontSize:15, fontWeight:700, color:'#1c1917' }}>Daily Revenue</div>
+                      <div style={{ fontSize:12, color:'#a8a29e', marginTop:2 }}>Last 14 days (INR)</div>
+                    </div>
+                    <div style={{ fontSize:11, background:'#f5f3ff', color:'#7c3aed', padding:'4px 12px', borderRadius:20, fontWeight:700 }}>📅 14-Day Trend</div>
+                  </div>
+                  <ResponsiveContainer width="100%" height={220}>
+                    <AreaChart data={revData} margin={{ top:5, right:10, left:10, bottom:0 }}>
+                      <defs>
+                        <linearGradient id="revenueGrad" x1="0" y1="0" x2="0" y2="1">
+                          <stop offset="5%" stopColor="#7c3aed" stopOpacity={0.25}/>
+                          <stop offset="95%" stopColor="#7c3aed" stopOpacity={0}/>
+                        </linearGradient>
+                      </defs>
+                      <CartesianGrid strokeDasharray="3 3" stroke="#f0eeed" vertical={false}/>
+                      <XAxis dataKey="date" tick={{ fontSize:11, fill:'#a8a29e', fontFamily:'Inter,sans-serif' }} axisLine={false} tickLine={false}/>
+                      <YAxis tick={{ fontSize:11, fill:'#a8a29e', fontFamily:'Inter,sans-serif' }} axisLine={false} tickLine={false} tickFormatter={v=>`₹${v}`}/>
+                      <Tooltip content={<RevenueTooltip/>}/>
+                      <Area type="monotone" dataKey="revenue" stroke="#7c3aed" strokeWidth={2.5} fill="url(#revenueGrad)" dot={{ r:3, fill:'#7c3aed', strokeWidth:0 }} activeDot={{ r:6, fill:'#7c3aed', stroke:'#fff', strokeWidth:2 }}/>
+                    </AreaChart>
+                  </ResponsiveContainer>
+                </div>
+
+                {/* ─ Row 2: Pie Charts ─ */}
+                <div style={{ display:'grid', gridTemplateColumns:'1fr 1fr', gap:20, marginBottom:20 }}>
+                  {/* Payment Methods Donut */}
+                  <div style={{ background:'#fff', borderRadius:18, padding:'24px 28px', boxShadow:'0 2px 16px rgba(0,0,0,0.06)', border:'1px solid #ece9e6' }}>
+                    <div style={{ fontSize:15, fontWeight:700, color:'#1c1917', marginBottom:4 }}>💳 Payment Methods</div>
+                    <div style={{ fontSize:12, color:'#a8a29e', marginBottom:20 }}>Order distribution by payment type</div>
+                    {payData.length === 0 ? (
+                      <div style={{ textAlign:'center', padding:'40px 0', color:'#a8a29e', fontSize:13 }}>No payment data</div>
+                    ) : (
+                      <div style={{ display:'flex', alignItems:'center', gap:20 }}>
+                        <ResponsiveContainer width={160} height={160}>
+                          <PieChart>
+                            <Pie data={payData} dataKey="value" innerRadius={46} outerRadius={74} paddingAngle={3} startAngle={90} endAngle={-270}>
+                              {payData.map((entry, idx) => <Cell key={idx} fill={entry.color} stroke="none"/>)}
+                            </Pie>
+                            <Tooltip formatter={(v,n) => [`${v} orders`, n]}/>
+                          </PieChart>
+                        </ResponsiveContainer>
+                        <div style={{ flex:1, display:'flex', flexDirection:'column', gap:10 }}>
+                          {payData.map((p,i) => {
+                            const tot = payData.reduce((a,b)=>a+b.value,0)||1;
+                            return (
+                              <div key={i} style={{ display:'flex', alignItems:'center', gap:10 }}>
+                                <div style={{ width:10, height:10, borderRadius:'50%', background:p.color, flexShrink:0 }}/>
+                                <div style={{ flex:1, fontSize:12, fontWeight:600, color:'#44403c' }}>{p.icon} {p.name}</div>
+                                <div style={{ fontSize:12, fontWeight:700, color:p.color }}>{Math.round((p.value/tot)*100)}%</div>
+                              </div>
+                            );
+                          })}
+                        </div>
+                      </div>
+                    )}
+                  </div>
+
+                  {/* Order Status Donut */}
+                  <div style={{ background:'#fff', borderRadius:18, padding:'24px 28px', boxShadow:'0 2px 16px rgba(0,0,0,0.06)', border:'1px solid #ece9e6' }}>
+                    <div style={{ fontSize:15, fontWeight:700, color:'#1c1917', marginBottom:4 }}>📍 Order Status</div>
+                    <div style={{ fontSize:12, color:'#a8a29e', marginBottom:20 }}>Breakdown of all order statuses</div>
+                    {statusData.length === 0 ? (
+                      <div style={{ textAlign:'center', padding:'40px 0', color:'#a8a29e', fontSize:13 }}>No status data</div>
+                    ) : (
+                      <div style={{ display:'flex', alignItems:'center', gap:20 }}>
+                        <ResponsiveContainer width={160} height={160}>
+                          <PieChart>
+                            <Pie data={statusData} dataKey="value" innerRadius={46} outerRadius={74} paddingAngle={3} startAngle={90} endAngle={-270}>
+                              {statusData.map((entry, idx) => <Cell key={idx} fill={entry.color} stroke="none"/>)}
+                            </Pie>
+                            <Tooltip formatter={(v,n) => [`${v} orders`, n]}/>
+                          </PieChart>
+                        </ResponsiveContainer>
+                        <div style={{ flex:1, display:'flex', flexDirection:'column', gap:10 }}>
+                          {statusData.map((p,i) => {
+                            const tot = statusData.reduce((a,b)=>a+b.value,0)||1;
+                            return (
+                              <div key={i} style={{ display:'flex', alignItems:'center', gap:10 }}>
+                                <div style={{ width:10, height:10, borderRadius:'50%', background:p.color, flexShrink:0 }}/>
+                                <div style={{ flex:1, fontSize:12, fontWeight:600, color:'#44403c' }}>{p.name}</div>
+                                <div style={{ fontSize:13, fontWeight:800, color:p.color }}>{p.value}</div>
+                                <div style={{ fontSize:11, color:'#a8a29e' }}>({Math.round((p.value/tot)*100)}%)</div>
+                              </div>
+                            );
+                          })}
+                        </div>
+                      </div>
+                    )}
+                  </div>
+                </div>
+
+                {/* ─ Row 3: Horizontal Bar — Top Items ─ */}
+                {topBarData.length > 0 && (
+                  <div style={{ background:'#fff', borderRadius:18, padding:'24px 28px', boxShadow:'0 2px 16px rgba(0,0,0,0.06)', border:'1px solid #ece9e6', marginBottom:20 }}>
+                    <div style={{ fontSize:15, fontWeight:700, color:'#1c1917', marginBottom:4 }}>🏆 Top Selling Items</div>
+                    <div style={{ fontSize:12, color:'#a8a29e', marginBottom:20 }}>Ranked by quantity sold</div>
+                    <ResponsiveContainer width="100%" height={Math.max(topBarData.length * 44, 180)}>
+                      <BarChart data={topBarData} layout="vertical" margin={{ top:0, right:20, left:10, bottom:0 }} barSize={14}>
+                        <CartesianGrid strokeDasharray="3 3" stroke="#f0eeed" horizontal={false}/>
+                        <XAxis type="number" tick={{ fontSize:11, fill:'#a8a29e', fontFamily:'Inter,sans-serif' }} axisLine={false} tickLine={false}/>
+                        <YAxis type="category" dataKey="name" width={130} tick={{ fontSize:12, fill:'#44403c', fontFamily:'Inter,sans-serif' }} axisLine={false} tickLine={false}/>
+                        <Tooltip content={<BarTooltip/>}/>
+                        <Bar dataKey="qty" radius={[0,6,6,0]}>
+                          {topBarData.map((_, idx) => {
+                            const colors = ['#7c3aed','#6d28d9','#5b21b6','#4c1d95','#7c3aed','#6d28d9','#5b21b6','#4c1d95'];
+                            return <Cell key={idx} fill={colors[idx % colors.length]}/>;
+                          })}
+                        </Bar>
+                      </BarChart>
+                    </ResponsiveContainer>
+                  </div>
+                )}
+
+                {/* ─ Recent Orders Table ─ */}
+                <div style={{ background:'#fff', borderRadius:18, overflow:'hidden', boxShadow:'0 2px 16px rgba(0,0,0,0.06)', border:'1px solid #ece9e6' }}>
+                  <div style={{ padding:'20px 28px', borderBottom:'1px solid #f0eeed', display:'flex', justifyContent:'space-between', alignItems:'center' }}>
+                    <div style={{ fontSize:15, fontWeight:700, color:'#1c1917' }}>📋 Recent Orders</div>
+                    <div style={{ fontSize:12, color:'#a8a29e' }}>Last {report.recentOrders?.length||0} orders</div>
+                  </div>
+                  <div style={{ overflowX:'auto' }}>
+                    <table style={{ width:'100%', borderCollapse:'collapse', fontSize:13 }}>
+                      <thead>
+                        <tr style={{ background:'#fafaf9' }}>
+                          {['Order #','Customer','Email','Table','Total','Payment','Status','Date'].map(h=>(
+                            <th key={h} style={{ padding:'10px 16px', textAlign:'left', fontSize:11, fontWeight:700, color:'#a8a29e', textTransform:'uppercase', letterSpacing:'0.06em', whiteSpace:'nowrap' }}>{h}</th>
+                          ))}
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {report.recentOrders?.map((o,i) => {
+                          const ST = { new:{ bg:'#fef2f2',c:'#dc2626' }, preparing:{ bg:'#fffbeb',c:'#d97706' }, ready:{ bg:'#f0fdf4',c:'#16a34a' }, served:{ bg:'#f0f9ff',c:'#0369a1' } };
+                          const st = ST[o.status]||{ bg:'#f5f5f4',c:'#78716c' };
+                          const PAY_ICON = { cash:'💵',upi:'📱',card:'💳',fake_pay:'💳',pending:'⏳' };
+                          return (
+                            <tr key={o._id} style={{ borderTop:'1px solid #f7f4f0', background: i%2===0?'#fff':'#fcfcfb', transition:'background .15s' }}>
+                              <td style={{ padding:'12px 16px', fontWeight:800, color:'#7c3aed' }}>#{o.orderNumber||'-'}</td>
+                              <td style={{ padding:'12px 16px', color:'#1c1917', fontWeight:500 }}>{o.customerName||'-'}</td>
+                              <td style={{ padding:'12px 16px', color:'#78716c', fontSize:12 }}>{o.customerEmail||<span style={{color:'#d1ccc8'}}>—</span>}</td>
+                              <td style={{ padding:'12px 16px', color:'#1c1917' }}>🪑 {o.tableNumber}</td>
+                              <td style={{ padding:'12px 16px', fontWeight:800, color:'#1c1917' }}>₹{o.total}</td>
+                              <td style={{ padding:'12px 16px', color:'#44403c' }}>{PAY_ICON[o.paymentMethod]||''} {o.paymentMethod}</td>
+                              <td style={{ padding:'12px 16px' }}><span style={{ ...s.statusPill, background:st.bg, color:st.c }}>{o.status}</span></td>
+                              <td style={{ padding:'12px 16px', color:'#a8a29e', fontSize:11, whiteSpace:'nowrap' }}>{new Date(o.createdAt).toLocaleDateString('en-IN',{day:'numeric',month:'short',hour:'2-digit',minute:'2-digit'})}</td>
+                            </tr>
+                          );
+                        })}
+                      </tbody>
+                    </table>
+                  </div>
+                </div>
+              </>
+            )}
+          </div>
+          );
+        })()}
 
         {/* ── Orders Tab ── */}
         {nav === 'orders' && (

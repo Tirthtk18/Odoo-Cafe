@@ -7,6 +7,285 @@ const PRODUCT_API = 'http://localhost:5000/api/products';
 
 const TABLES = [1,2,3,4,5,6,7,8];
 
+/* ─── Payment sub-component styles (must be above sub-components) ─── */
+const pm = {
+  overlay:     { position:'fixed', inset:0, background:'rgba(0,0,0,0.65)', backdropFilter:'blur(6px)', display:'flex', alignItems:'center', justifyContent:'center', zIndex:200, padding:20 },
+  box:         { background:'#fff', borderRadius:24, padding:'32px', width:'100%', maxWidth:440, boxShadow:'0 24px 80px rgba(0,0,0,0.35)', maxHeight:'90vh', overflowY:'auto', fontFamily:'Inter,sans-serif' },
+  head:        { display:'flex', alignItems:'flex-start', justifyContent:'space-between', marginBottom:24 },
+  closeX:      { width:32, height:32, borderRadius:8, border:'1.5px solid #e7e5e4', background:'#fafaf9', cursor:'pointer', fontSize:14, display:'flex', alignItems:'center', justifyContent:'center', flexShrink:0 },
+  amountBanner:{ background:'linear-gradient(135deg,#1c1917,#292524)', borderRadius:14, padding:'14px 0 10px', textAlign:'center', marginBottom:16 },
+  field:       { marginBottom:14 },
+  label:       { display:'block', fontSize:12, fontWeight:600, color:'#44403c', marginBottom:6 },
+  input:       { width:'100%', padding:'11px 14px', borderRadius:10, border:'1.5px solid #e7e5e4', fontSize:14, color:'#1c1917', background:'#fafaf9', fontFamily:'Inter,sans-serif', boxSizing:'border-box', outline:'none' },
+  errBox:      { background:'#fef2f2', border:'1px solid #fecaca', borderRadius:10, padding:'10px 14px', fontSize:12, color:'#dc2626', marginBottom:14 },
+  confirmBtn:  { width:'100%', padding:'13px', borderRadius:12, border:'none', background:'linear-gradient(135deg,#1c1917,#292524)', color:'#fff', fontSize:14, fontWeight:700, cursor:'pointer', fontFamily:'Inter,sans-serif', boxShadow:'0 4px 16px rgba(28,25,23,0.3)', display:'block' },
+  backBtn:     { width:'100%', padding:'10px', borderRadius:10, border:'1.5px solid #e9d5ff', background:'transparent', color:'#7c3aed', fontSize:13, cursor:'pointer', fontFamily:'Inter,sans-serif' },
+};
+
+/* ─── Cash Step ─── */
+function CashStep({ amount, onConfirm, onBack }) {
+  const [cashIn, setCashIn] = useState('');
+  const change = Number(cashIn) - amount;
+  const valid = cashIn && Number(cashIn) >= amount;
+  return (
+    <div>
+      <div style={pm.amountBanner}>
+        <div style={{ color:'rgba(255,255,255,0.7)', fontSize:11, letterSpacing:'0.1em', textTransform:'uppercase', marginBottom:4 }}>Amount Due</div>
+        <div style={{ color:'#fff', fontSize:38, fontWeight:900, letterSpacing:'-0.03em' }}>₹{amount}</div>
+      </div>
+      <div style={{ fontSize:72, textAlign:'center', margin:'16px 0 8px' }}>💵</div>
+      <div style={pm.field}>
+        <label style={pm.label}>Cash Received from Customer</label>
+        <input
+          type="number"
+          value={cashIn}
+          onChange={e => setCashIn(e.target.value)}
+          placeholder={`₹${amount}`}
+          style={{ ...pm.input, fontSize:22, fontWeight:700 }}
+          autoFocus
+        />
+      </div>
+      {cashIn && Number(cashIn) >= amount && (
+        <div style={{ background:'#f0fdf4', border:'1px solid #bbf7d0', borderRadius:12, padding:'12px 16px', marginBottom:16, display:'flex', justifyContent:'space-between', alignItems:'center' }}>
+          <span style={{ fontSize:13, color:'#15803d', fontWeight:600 }}>💰 Change to Return</span>
+          <span style={{ fontSize:22, fontWeight:900, color:'#16a34a' }}>₹{change}</span>
+        </div>
+      )}
+      {cashIn && Number(cashIn) < amount && (
+        <div style={pm.errBox}>⚠ Amount is less than the total (₹{amount - Number(cashIn)} short)</div>
+      )}
+      <button onClick={() => onConfirm('cash')} disabled={!valid} style={{ ...pm.confirmBtn, opacity: valid ? 1 : 0.5, cursor: valid ? 'pointer' : 'not-allowed', marginBottom:8 }}>
+        ✅ Confirm Cash Payment
+      </button>
+      <button onClick={onBack} style={pm.backBtn}>← Change Method</button>
+    </div>
+  );
+}
+
+/* ─── UPI Step ─── */
+function UPIStep({ amount, onConfirm, onBack }) {
+  const [confirmed, setConfirmed] = useState(false);
+  return (
+    <div style={{ textAlign:'center' }}>
+      <div style={pm.amountBanner}>
+        <div style={{ color:'rgba(255,255,255,0.7)', fontSize:11, letterSpacing:'0.1em', textTransform:'uppercase', marginBottom:4 }}>Amount Due</div>
+        <div style={{ color:'#fff', fontSize:38, fontWeight:900, letterSpacing:'-0.03em' }}>₹{amount}</div>
+      </div>
+      <div style={{ background:'#fff', border:'2px solid #e9d5ff', borderRadius:16, padding:14, display:'inline-block', margin:'16px 0 10px' }}>
+        <img src="/upi_qr.png" alt="UPI QR" style={{ width:180, height:180, display:'block' }} />
+      </div>
+      <div style={{ fontSize:13, color:'#44403c', marginBottom:4, fontWeight:600 }}>Scan with any UPI app</div>
+      <div style={{ display:'flex', alignItems:'center', justifyContent:'center', gap:8, marginBottom:6 }}>
+        {['GPay','PhonePe','Paytm','BHIM'].map(a => (
+          <span key={a} style={{ fontSize:11, background:'#f3e8ff', color:'#7c3aed', padding:'3px 8px', borderRadius:20, fontWeight:600 }}>{a}</span>
+        ))}
+      </div>
+      <div style={{ fontSize:12, color:'#78716c', marginBottom:18 }}>
+        UPI ID: <strong style={{ color:'#7c3aed' }}>poscafe@upi</strong>
+      </div>
+      {!confirmed ? (
+        <button onClick={() => setConfirmed(true)} style={{ ...pm.confirmBtn, marginBottom:8 }}>
+          ✅ Customer Has Paid via UPI
+        </button>
+      ) : (
+        <div>
+          <div style={{ background:'#f0fdf4', border:'1px solid #bbf7d0', borderRadius:10, padding:'12px', marginBottom:12, fontSize:13, color:'#16a34a', fontWeight:600 }}>
+            🎉 UPI payment confirmed!
+          </div>
+          <button onClick={() => onConfirm('upi')} style={{ ...pm.confirmBtn, marginBottom:8 }}>Complete Order →</button>
+        </div>
+      )}
+      <button onClick={onBack} style={pm.backBtn}>← Change Method</button>
+    </div>
+  );
+}
+
+/* ─── Card Step ─── */
+function CardStep({ amount, onConfirm, onBack }) {
+  const [card, setCard] = useState({ number:'', name:'', expiry:'', cvv:'' });
+  const [step, setStep] = useState('form'); // form | processing | done
+  const [err, setErr] = useState('');
+  const fmt = v => v.replace(/\D/g,'').slice(0,16).replace(/(.{4})/g,'$1 ').trim();
+
+  const handlePay = (e) => {
+    e.preventDefault();
+    if (card.number.replace(/\s/g,'').length < 16) return setErr('Enter a valid 16-digit card number');
+    if (!card.name.trim()) return setErr('Enter cardholder name');
+    if (!card.expiry) return setErr('Enter expiry date');
+    if (card.cvv.length < 3) return setErr('Enter valid CVV');
+    setErr(''); setStep('processing');
+    setTimeout(() => { setStep('done'); setTimeout(() => onConfirm('card'), 1500); }, 2200);
+  };
+
+  if (step === 'processing') return (
+    <div style={{ textAlign:'center', padding:'40px 0' }}>
+      <div style={{ width:52,height:52,border:'4px solid #f0eeed',borderTopColor:'#f59e0b',borderRadius:'50%',display:'inline-block',animation:'spin 0.8s linear infinite',marginBottom:20 }}/>
+      <div style={{ fontSize:18,fontWeight:700,color:'#1c1917',marginBottom:6 }}>Processing Card…</div>
+      <div style={{ fontSize:13,color:'#78716c' }}>Please wait</div>
+    </div>
+  );
+  if (step === 'done') return (
+    <div style={{ textAlign:'center', padding:'32px 0' }}>
+      <div style={{ width:70,height:70,borderRadius:'50%',background:'linear-gradient(135deg,#22c55e,#16a34a)',display:'flex',alignItems:'center',justifyContent:'center',fontSize:32,margin:'0 auto 16px',boxShadow:'0 8px 24px rgba(34,197,94,0.3)' }}>✓</div>
+      <div style={{ fontSize:20,fontWeight:800,color:'#1c1917',marginBottom:4 }}>Card Approved!</div>
+      <div style={{ fontSize:13,color:'#78716c' }}>Completing order…</div>
+    </div>
+  );
+
+  return (
+    <div>
+      {/* Card Preview */}
+      <div style={{ background:'linear-gradient(135deg,#1c1917,#44403c)',borderRadius:14,padding:'18px 20px',marginBottom:18,color:'#fff',position:'relative',overflow:'hidden' }}>
+        <div style={{ position:'absolute',top:-30,right:-30,width:120,height:120,borderRadius:'50%',background:'rgba(255,255,255,0.05)' }}/>
+        <div style={{ fontSize:10,opacity:0.5,marginBottom:10,letterSpacing:'0.1em',textTransform:'uppercase' }}>Card Number</div>
+        <div style={{ fontSize:16,fontWeight:700,letterSpacing:'0.15em',marginBottom:14,fontFamily:'monospace' }}>
+          {card.number || '•••• •••• •••• ••••'}
+        </div>
+        <div style={{ display:'flex',justifyContent:'space-between',fontSize:11,opacity:0.7 }}>
+          <div><div style={{ fontSize:9,textTransform:'uppercase',letterSpacing:'0.1em',marginBottom:2 }}>Cardholder</div><div style={{ fontWeight:700,fontSize:12 }}>{card.name||'YOUR NAME'}</div></div>
+          <div><div style={{ fontSize:9,textTransform:'uppercase',letterSpacing:'0.1em',marginBottom:2 }}>Expires</div><div style={{ fontWeight:700,fontSize:12 }}>{card.expiry||'MM/YY'}</div></div>
+          <div style={{ textAlign:'right' }}><div style={{ fontSize:9,textTransform:'uppercase',letterSpacing:'0.1em',marginBottom:2 }}>Amount</div><div style={{ fontWeight:700,fontSize:12 }}>₹{amount}</div></div>
+        </div>
+      </div>
+      <form onSubmit={handlePay}>
+        <div style={pm.field}><label style={pm.label}>Card Number</label>
+          <input placeholder="1234 5678 9012 3456" value={card.number} onChange={e=>setCard(p=>({...p,number:fmt(e.target.value)}))} maxLength={19} style={pm.input}/>
+        </div>
+        <div style={pm.field}><label style={pm.label}>Cardholder Name</label>
+          <input placeholder="John Doe" value={card.name} onChange={e=>setCard(p=>({...p,name:e.target.value}))} style={pm.input}/>
+        </div>
+        <div style={{ display:'grid',gridTemplateColumns:'1fr 1fr',gap:12 }}>
+          <div style={pm.field}><label style={pm.label}>Expiry</label>
+            <input type="month" value={card.expiry} onChange={e=>setCard(p=>({...p,expiry:e.target.value}))} style={pm.input}/>
+          </div>
+          <div style={pm.field}><label style={pm.label}>CVV</label>
+            <input type="password" placeholder="•••" maxLength={4} value={card.cvv} onChange={e=>setCard(p=>({...p,cvv:e.target.value.replace(/\D/g,'')}))} style={pm.input}/>
+          </div>
+        </div>
+        {err && <div style={pm.errBox}>⚠ {err}</div>}
+        <button type="submit" style={{ ...pm.confirmBtn, background:'linear-gradient(135deg,#f59e0b,#f97316)', marginBottom:8 }}>
+          🔒 Charge ₹{amount}
+        </button>
+        <p style={{ textAlign:'center',fontSize:11,color:'#a8a29e',marginBottom:10 }}>256-bit SSL Encrypted · Demo Mode</p>
+      </form>
+      <button onClick={onBack} style={pm.backBtn}>← Change Method</button>
+    </div>
+  );
+}
+
+/* ─── Customer Info Modal (collect name + email before payment) ─── */
+function CustomerInfoModal({ onContinue, onClose }) {
+  const [name, setName]   = useState('');
+  const [email, setEmail] = useState('');
+  const [err, setErr]     = useState('');
+
+  const handleSubmit = (e) => {
+    e.preventDefault();
+    setErr('');
+    if (!name.trim()) return setErr('Customer name is required');
+    if (email && !/^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(email))
+      return setErr('Enter a valid email address (or leave blank)');
+    onContinue(name.trim(), email.trim());
+  };
+
+  return (
+    <div style={pm.overlay} onClick={e => e.target===e.currentTarget && onClose()}>
+      <div style={{ ...pm.box, maxWidth:420 }} className="anim-popIn">
+        <div style={pm.head}>
+          <div>
+            <div style={{ fontSize:11, fontWeight:700, color:'#a8a29e', textTransform:'uppercase', letterSpacing:'0.12em', marginBottom:4 }}>Customer Details</div>
+            <div style={{ fontSize:22, fontWeight:800, color:'#1c1917', letterSpacing:'-0.03em' }}>👤 Who is this order for?</div>
+          </div>
+          <button onClick={onClose} style={pm.closeX}>✕</button>
+        </div>
+
+        <div style={{ background:'#f5f3ff', border:'1px solid #e9d5ff', borderRadius:12, padding:'12px 16px', marginBottom:20, fontSize:13, color:'#7c3aed', fontWeight:500 }}>
+          📧 An invoice will be emailed to the customer automatically.
+        </div>
+
+        <form onSubmit={handleSubmit}>
+          <div style={pm.field}>
+            <label style={pm.label}>Customer Name <span style={{ color:'#dc2626' }}>*</span></label>
+            <input
+              autoFocus
+              value={name}
+              onChange={e => setName(e.target.value)}
+              placeholder="e.g. Rahul Sharma"
+              style={pm.input}
+            />
+          </div>
+          <div style={pm.field}>
+            <label style={pm.label}>Customer Email <span style={{ color:'#a8a29e', fontWeight:400 }}>(optional — for invoice)</span></label>
+            <input
+              type="email"
+              value={email}
+              onChange={e => setEmail(e.target.value)}
+              placeholder="rahul@example.com"
+              style={pm.input}
+            />
+          </div>
+          {err && <div style={pm.errBox}>⚠ {err}</div>}
+          <button type="submit" style={{ ...pm.confirmBtn, background:'linear-gradient(135deg,#7c3aed,#6d28d9)', marginBottom:8 }}>
+            Continue to Payment →
+          </button>
+          <button type="button" onClick={onClose} style={pm.backBtn}>Cancel</button>
+        </form>
+      </div>
+    </div>
+  );
+}
+
+/* ─── Payment Modal ─── */
+function PaymentModal({ amount, table, customerName, onSuccess, onClose }) {
+  const [method, setMethod] = useState(null);
+
+  const METHODS = [
+    { key:'cash', icon:'💵', label:'Cash',               sub:'Calculate change',        color:'#16a34a', bg:'#f0fdf4', border:'#bbf7d0' },
+    { key:'upi',  icon:'📱', label:'UPI / QR',           sub:'Scan café QR to pay',     color:'#4f46e5', bg:'#eef2ff', border:'#c7d2fe' },
+    { key:'card', icon:'💳', label:'Debit / Credit Card', sub:'Swipe or insert card',    color:'#f59e0b', bg:'#fffbeb', border:'#fde68a' },
+  ];
+
+  return (
+    <div style={pm.overlay} onClick={e => e.target===e.currentTarget && onClose()}>
+      <div style={pm.box} className="anim-popIn">
+        {/* Header */}
+        <div style={pm.head}>
+          <div>
+            <div style={{ fontSize:11, fontWeight:700, color:'#a8a29e', textTransform:'uppercase', letterSpacing:'0.12em', marginBottom:4 }}>Payment — Table {table}</div>
+            <div style={{ fontSize:28, fontWeight:900, color:'#1c1917', letterSpacing:'-0.04em' }}>₹{amount}</div>
+            {customerName && <div style={{ fontSize:13, color:'#7c3aed', fontWeight:600, marginTop:4 }}>👤 {customerName}</div>}
+          </div>
+          <button onClick={onClose} style={pm.closeX}>✕</button>
+        </div>
+
+        {/* Method picker */}
+        {!method && (
+          <>
+            <div style={{ fontSize:12, fontWeight:700, color:'#44403c', marginBottom:12, textTransform:'uppercase', letterSpacing:'0.06em' }}>Choose Payment Method</div>
+            <div style={{ display:'flex', flexDirection:'column', gap:10, marginBottom:4 }}>
+              {METHODS.map(m => (
+                <button key={m.key} onClick={() => setMethod(m.key)}
+                  style={{ display:'flex',alignItems:'center',gap:16,padding:'16px 18px',borderRadius:14,border:`2px solid ${m.border}`,background:m.bg,cursor:'pointer',textAlign:'left',transition:'all .15s',fontFamily:'Inter,sans-serif' }}>
+                  <span style={{ fontSize:28 }}>{m.icon}</span>
+                  <div style={{ flex:1 }}>
+                    <div style={{ fontSize:14, fontWeight:700, color:m.color }}>{m.label}</div>
+                    <div style={{ fontSize:11, color:'#78716c', marginTop:2 }}>{m.sub}</div>
+                  </div>
+                  <span style={{ fontSize:18, color:m.color }}>→</span>
+                </button>
+              ))}
+            </div>
+          </>
+        )}
+
+        {method === 'cash' && <CashStep amount={amount} onConfirm={m => onSuccess(m)} onBack={() => setMethod(null)} />}
+        {method === 'upi'  && <UPIStep  amount={amount} onConfirm={m => onSuccess(m)} onBack={() => setMethod(null)} />}
+        {method === 'card' && <CardStep amount={amount} onConfirm={m => onSuccess(m)} onBack={() => setMethod(null)} />}
+      </div>
+    </div>
+  );
+}
+
 export default function POS() {
   const { user, logout }        = useAuth();
   const navigate                = useNavigate();
@@ -28,10 +307,11 @@ export default function POS() {
   }, []);
 
   const CATS = ['All', ...['Coffee','Food','Snacks','Drinks','Other'].filter(c => menu.some(m => m.category === c))];
-  const [payModal, setPayModal] = useState(false);
-  const [payDone, setPayDone]   = useState(false);
-  const [payMethod, setMethod]  = useState('cash');
-  const [cashIn, setCashIn]     = useState('');
+  const [payModal, setPayModal]       = useState(false);
+  const [payDone, setPayDone]         = useState(false);
+  const [custModal, setCustModal]     = useState(false); // customer info modal
+  const [customerName, setCustomerName] = useState('');
+  const [customerEmail, setCustomerEmail] = useState('');
 
   // Order status
   const [sending, setSending]   = useState(false);
@@ -73,11 +353,27 @@ export default function POS() {
   const subtotal = cart.reduce((s, c) => s + c.price * c.qty, 0);
   const tax      = Math.round(subtotal * 0.05);
   const total    = subtotal + tax;
-  const change   = Number(cashIn) - total;
+
+  // ── Open customer info then proceed to Pay ───────────────────────────────
+  const handlePayClick = () => {
+    if (cart.length === 0) return;
+    // If we already collected customer info, go straight to payment
+    if (customerName) { setPayModal(true); return; }
+    setCustModal(true);
+  };
+
+  const handleCustomerContinue = (name, email) => {
+    setCustomerName(name);
+    setCustomerEmail(email);
+    setCustModal(false);
+    setPayModal(true);
+  };
 
   // ── Send order to kitchen (saves to DB) ──────────────────────────────────
   const sendToKitchen = async () => {
     if (cart.length === 0 || sending || sentOrderId) return;
+    // Require customer info first
+    if (!customerName) { setCustModal(true); return; }
     setSending(true);
     try {
       const res = await fetch(ORDER_BASE, {
@@ -87,11 +383,13 @@ export default function POS() {
           Authorization:  `Bearer ${user?.token}`,
         },
         body: JSON.stringify({
-          items:       cart.map(c=>({ id: c._id, name: c.name, qty: c.qty, price: c.price, emoji: c.emoji||'🍽️', cat: c.category })),
-          tableNumber: table,
+          items:         cart.map(c=>({ id: c._id, name: c.name, qty: c.qty, price: c.price, emoji: c.emoji||'🍽️', cat: c.category })),
+          tableNumber:   table,
           subtotal,
-          gst: tax,
+          gst:           tax,
           total,
+          customerName,
+          customerEmail,
         }),
       });
       const data = await res.json();
@@ -110,7 +408,7 @@ export default function POS() {
   };
 
   // ── Confirm payment (saves order if not already sent) ────────────────────
-  const handlePayment = async () => {
+  const handlePayment = async (method) => {
     // If order wasn't yet sent to kitchen, send it now as part of payment
     if (!sentOrderId) {
       setSending(true);
@@ -122,11 +420,14 @@ export default function POS() {
             Authorization:  `Bearer ${user?.token}`,
           },
           body: JSON.stringify({
-            items:       cart.map(c=>({ id: c._id, name: c.name, qty: c.qty, price: c.price, emoji: c.emoji||'🍽️', cat: c.category })),
-            tableNumber: table,
+            items:         cart.map(c=>({ id: c._id, name: c.name, qty: c.qty, price: c.price, emoji: c.emoji||'🍽️', cat: c.category })),
+            tableNumber:   table,
             subtotal,
-            gst: tax,
+            gst:           tax,
             total,
+            paymentMethod: method,
+            customerName,
+            customerEmail,
           }),
         });
         if (!res.ok) {
@@ -151,8 +452,9 @@ export default function POS() {
       setPayModal(false);
       setPayDone(false);
       setCart([]);
-      setCashIn('');
       setSentOrderId(null);
+      setCustomerName('');
+      setCustomerEmail('');
     }, 2200);
   };
 
@@ -162,7 +464,8 @@ export default function POS() {
     setSentOrderId(null);
     setPayModal(false);
     setPayDone(false);
-    setCashIn('');
+    setCustomerName('');
+    setCustomerEmail('');
   };
 
   const handleLogout = () => { logout(); navigate('/login'); };
@@ -317,6 +620,13 @@ export default function POS() {
             <div>
               <h2 style={s.cartTitle}>Order — Table {table}</h2>
               <p style={s.cartSub}>{cart.length === 0 ? 'No items yet' : `${cart.reduce((s,c) => s+c.qty,0)} items`}</p>
+              {customerName && (
+                <div style={{ marginTop:4, display:'flex', alignItems:'center', gap:6 }}>
+                  <span style={{ fontSize:11, color:'#7c3aed', fontWeight:600, background:'#f5f3ff', padding:'2px 8px', borderRadius:20, border:'1px solid #e9d5ff' }}>👤 {customerName}</span>
+                  {customerEmail && <span style={{ fontSize:10, color:'#a8a29e' }}>📧</span>}
+                  {!orderLocked && <button onClick={() => { setCustomerName(''); setCustomerEmail(''); }} style={{ fontSize:10, color:'#dc2626', background:'none', border:'none', cursor:'pointer', padding:0 }}>✕</button>}
+                </div>
+              )}
             </div>
             {cart.length > 0 && !orderLocked && (
               <button onClick={clearCart} style={s.clearBtn}>Clear</button>
@@ -373,7 +683,7 @@ export default function POS() {
                 <span>₹{total}</span>
               </div>
 
-              <button onClick={() => setPayModal(true)} style={s.payBtn}>
+              <button onClick={handlePayClick} style={s.payBtn}>
                 💳 Proceed to Payment
               </button>
 
@@ -397,105 +707,39 @@ export default function POS() {
       </div>
 
       {/* ─ Payment Modal ─ */}
-      {payModal && (
-        <div style={s.overlay} onClick={(e) => e.target === e.currentTarget && !payDone && setPayModal(false)}>
-          <div style={s.modal} className="anim-popIn">
-            {payDone ? (
-              <div style={{ textAlign: 'center', padding: '24px 0' }}>
-                <div style={s.successCircle}>✓</div>
-                <h3 style={{ fontSize: 22, fontWeight: 800, color: '#16a34a', marginTop: 16, marginBottom: 8 }}>Payment Successful!</h3>
-                <p style={{ color: '#78716c', fontSize: 14 }}>Order for Table {table} is confirmed.</p>
-                <p style={{ color: '#a8a29e', fontSize: 12, marginTop: 6 }}>Order sent to Kitchen &amp; Admin Dashboard.</p>
-              </div>
-            ) : (
-              <>
-                <div style={s.modalHead}>
-                  <h3 style={s.modalTitle}>Payment — Table {table}</h3>
-                  <button onClick={() => setPayModal(false)} style={s.closeBtn}>✕</button>
-                </div>
-
-                {sentOrderId && (
-                  <div style={s.kitchenConfirmed}>
-                    🍳 Kitchen notified — Order #{sentOrderId.slice(-6).toUpperCase()}
-                  </div>
-                )}
-
-                <div style={s.totalBanner}>
-                  <span style={{ color: '#78716c', fontSize: 13 }}>Amount Due</span>
-                  <span style={{ fontSize: 34, fontWeight: 800, color: '#1c1917', letterSpacing: '-0.04em' }}>₹{total}</span>
-                </div>
-
-                {/* Payment Methods */}
-                <div style={s.methodRow}>
-                  {[
-                    { key: 'cash',  icon: '💵', label: 'Cash' },
-                    { key: 'card',  icon: '💳', label: 'Card' },
-                    { key: 'upi',   icon: '📱', label: 'UPI QR' },
-                  ].map(m => (
-                    <button
-                      key={m.key}
-                      onClick={() => setMethod(m.key)}
-                      style={{
-                        ...s.methodBtn,
-                        background:  payMethod === m.key ? '#1c1917' : '#f7f4f0',
-                        color:       payMethod === m.key ? '#fff'    : '#44403c',
-                        borderColor: payMethod === m.key ? '#1c1917' : '#e7e5e4',
-                      }}
-                    >
-                      <span style={{ fontSize: 22 }}>{m.icon}</span>
-                      <span style={{ fontSize: 12, fontWeight: 600 }}>{m.label}</span>
-                    </button>
-                  ))}
-                </div>
-
-                {/* Cash input */}
-                {payMethod === 'cash' && (
-                  <div style={s.cashSection} className="anim-slideDown">
-                    <label style={s.cashLabel}>Amount Received</label>
-                    <input
-                      type="number"
-                      value={cashIn}
-                      onChange={e => setCashIn(e.target.value)}
-                      placeholder={`₹${total}`}
-                      style={s.cashInput}
-                    />
-                    {cashIn && Number(cashIn) >= total && (
-                      <div style={s.changeBox}>
-                        Change: <strong style={{ color: '#16a34a' }}>₹{change}</strong>
-                      </div>
-                    )}
-                  </div>
-                )}
-
-                {/* UPI QR placeholder */}
-                {payMethod === 'upi' && (
-                  <div style={s.qrBox} className="anim-slideDown">
-                    <div style={s.qrPlaceholder}>
-                      <div style={{ fontSize: 48 }}>📱</div>
-                      <p style={{ fontSize: 13, color: '#78716c', marginTop: 8 }}>Scan QR to pay ₹{total}</p>
-                    </div>
-                  </div>
-                )}
-
-                <button
-                  onClick={handlePayment}
-                  disabled={
-                    sending ||
-                    (payMethod === 'cash' && (!cashIn || Number(cashIn) < total))
-                  }
-                  style={{
-                    ...s.confirmBtn,
-                    opacity: (sending || (payMethod === 'cash' && (!cashIn || Number(cashIn) < total))) ? 0.5 : 1,
-                    cursor:  (sending || (payMethod === 'cash' && (!cashIn || Number(cashIn) < total))) ? 'not-allowed' : 'pointer',
-                  }}
-                >
-                  {sending ? '⏳ Processing...' : '✅ Confirm Payment'}
-                </button>
-              </>
-            )}
+      {payDone && (
+        <div style={{ position:'fixed', inset:0, background:'rgba(0,0,0,0.65)', backdropFilter:'blur(4px)', display:'flex', alignItems:'center', justifyContent:'center', zIndex:200 }}>
+          <div style={{ background:'#fff', borderRadius:24, padding:'48px 32px', textAlign:'center', maxWidth:380, width:'100%', boxShadow:'0 24px 80px rgba(0,0,0,0.35)', fontFamily:'Inter,sans-serif' }} className="anim-popIn">
+            <div style={{ width:80,height:80,borderRadius:'50%',background:'linear-gradient(135deg,#22c55e,#16a34a)',color:'#fff',fontSize:36,fontWeight:700,display:'flex',alignItems:'center',justifyContent:'center',margin:'0 auto 20px',boxShadow:'0 8px 32px rgba(34,197,94,0.35)' }}>✓</div>
+            <div style={{ fontSize:22,fontWeight:800,color:'#16a34a',marginBottom:8 }}>Payment Successful!</div>
+            <div style={{ fontSize:14,color:'#78716c',marginBottom:4 }}>Order for Table {table} confirmed.</div>
+            <div style={{ fontSize:12,color:'#a8a29e' }}>Sent to Kitchen & Admin Dashboard.</div>
           </div>
         </div>
       )}
+      {custModal && (
+        <CustomerInfoModal
+          onContinue={handleCustomerContinue}
+          onClose={() => setCustModal(false)}
+        />
+      )}
+      {payModal && !payDone && (
+        <PaymentModal
+          amount={total}
+          table={table}
+          customerName={customerName}
+          onSuccess={(method) => { setPayModal(false); handlePayment(method); }}
+          onClose={() => setPayModal(false)}
+        />
+      )}
+      <style>{`
+        @import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800;900&display=swap');
+        @keyframes spin { to { transform: rotate(360deg); } }
+        @keyframes popIn { from{opacity:0;transform:scale(0.9)} to{opacity:1;transform:scale(1)} }
+        @keyframes slideDown { from{opacity:0;transform:translateY(-8px)} to{opacity:1;transform:translateY(0)} }
+        .anim-popIn { animation: popIn 0.25s cubic-bezier(.34,1.56,.64,1); }
+        .anim-slideDown { animation: slideDown 0.2s ease; }
+      `}</style>
     </div>
   );
 }
